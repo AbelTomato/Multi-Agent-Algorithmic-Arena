@@ -1,4 +1,8 @@
 .venv/
-docs/learning-route.md
+docs/学习路线.md
+docs/环境配置学习指南.md
+docs/开发日志.md
+backend/.venv/
+backend/.env
 __pycache__/
 *.py[cod]
