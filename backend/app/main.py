@@ -2,6 +2,8 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 
+from app.api.problems import router as problem_router
+
 
 settings = get_settings()
 
@@ -9,7 +11,7 @@ app = FastAPI(
     title=settings.app_name,
     debug=settings.debug,
 )
-
+app.include_router(problem_router)
 
 @app.get("/")
 async def root() -> dict[str, str]:
