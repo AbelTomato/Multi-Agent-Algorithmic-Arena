@@ -1,277 +1,331 @@
 # Multi-Agent-Algorithmic-Arena
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![React](https://img.shields.io/badge/React-18+-61DAFB.svg)](https://reactjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
+[![Status](https://img.shields.io/badge/status-learning%20prototype-orange.svg)](#当前状态)
 
-> 🤖 一个创新的多智能体算法竞技场，让 AI Agents 实时竞赛解算法题，支持辩驳机制和人机对战。
+> 一个学习式渐进开发项目。远期目标是构建“多智能体算法竞技场”：多个 AI Agents 同台解算法题，由裁判系统评测代码，并支持辩驳、人机对战和实时观赛。
 
-## ✨ 项目亮点
+当前仓库不是完整产品，而是后端最小切片阶段。README 按当前真实状态编写，远期能力会在后续阶段逐步接入。
 
-- **🏆 多 Agent 实时竞赛** - 支持 GPT-4、Claude、DeepSeek 等多种 LLM 同台竞技
-- **⚖️ AI 裁判系统** - 自动评判代码正确性、效率和质量，综合评分
-- **💬 辩驳机制** - Agent 可对评判结果提出异议，智能仲裁系统保证公平
-- **👥 人机对战** - 通过速度限制模拟人类行为，实现公平的人机竞赛
-- **📊 实时可视化** - WebSocket 实时推送，观看 Agent 思考和编码全过程
-- **🔒 安全沙箱** - Judge0 容器化执行环境，支持 60+ 编程语言
+---
 
-## 📋 核心功能
+## 当前状态
+
+当前已实现：
+
+- FastAPI 后端应用入口：`backend/app/main.py`
+- 配置管理：`backend/app/config.py`
+- SQLAlchemy async 基础数据库连接：`backend/app/database.py`
+- 最小 `Problem` 数据模型：`backend/app/models/problem.py`
+- 基础题目路由骨架：`GET /api/problems`
+- 健康检查：`GET /health`
+- pytest 测试基线
+
+当前尚未实现：
+
+- React 前端
+- Docker Compose
+- PostgreSQL
+- Redis
+- Judge0 沙箱
+- Alembic 数据库迁移
+- Agent 抽象接口
+- LLM Provider 接入
+- WebSocket 实时通信
+- 比赛状态机
+- 裁判与辩驳系统
+
+当前测试基线：
+
+```text
+8 passed, 26 warnings
+```
+
+warnings 主要来自当前 Python 版本和依赖包的弃用提示，不阻塞现阶段学习开发。后续会评估将长期开发版本固定到 Python 3.11 或 3.12。
+
+---
+
+## 项目愿景
+
+远期系统目标包括：
 
 ### 1. 多 Agent 算法竞赛
 
-- 多个 AI agent 同时接收算法题目
-- 各 agent 独立思考、编写解决方案
-- 实时追踪解题进度和思维过程
-- 支持自选 LLM 提供商（OpenAI / Anthropic / DeepSeek / 本地模型）
+- 多个 AI Agent 同时接收算法题目；
+- 各 Agent 独立思考、生成代码；
+- 支持 OpenAI、Anthropic、DeepSeek、本地模型等 Provider；
+- 实时追踪 Agent 思考、编码和提交过程。
 
 ### 2. 智能裁判系统
 
-- **正确性评判**：自动运行测试用例，验证代码正确性
-- **效率评估**：分析时间复杂度和空间复杂度
-- **质量审查**：LLM 评审代码风格、可读性和算法优雅度
-- **综合评分**：正确性 50% + 效率 30% + 质量 20%
+- 自动运行测试用例；
+- 判断正确性、时间、内存；
+- 结合 LLM 进行代码质量评审；
+- 综合评分：正确性、效率、质量。
 
-### 3. 辩驳（Debate）机制
+### 3. 辩驳机制
 
-- Agent 可对评判结果提出异议
-- 提供论据和证据支撑辩驳
-- Judge 审查并回应辩驳
-- 最多 2 轮辩驳，超过则触发仲裁
-- 辩驳成功可调整分数
+- Agent 可对裁判结果提出异议；
+- Judge 审查辩驳理由；
+- 支持有限轮次辩驳；
+- 必要时进入仲裁。
 
 ### 4. 人机对战模式
 
-- 限制 Agent 输出速度（字符/秒）
-- 模拟思考延迟和打字节奏
-- Web IDE 编辑器（Monaco Editor）
-- 公平的竞赛体验
+- 限制 Agent 输出速度；
+- 模拟人类思考和打字节奏；
+- 提供 Web IDE；
+- 支持人类与 Agent 同题竞赛。
 
-### 5. 实时通信
+### 5. 实时观赛
 
-- WebSocket 双向通信
-- 流式输出 Agent 思考过程
-- 多客户端同步观赛
-- 实时排行榜更新
+- WebSocket 推送比赛事件；
+- 多客户端同步观赛；
+- 实时排行榜；
+- 比赛历史回放。
 
-## 🏗️ 系统架构
+---
 
+## 当前架构
+
+当前实际架构：
+
+```text
+backend/
+├── app/
+│   ├── api/
+│   │   └── problems.py
+│   ├── models/
+│   │   └── problem.py
+│   ├── config.py
+│   ├── database.py
+│   └── main.py
+├── tests/
+│   ├── test_config.py
+│   ├── test_health.py
+│   ├── test_problem_model.py
+│   └── test_problems_api.py
+├── .env.example
+├── pyproject.toml
+└── requirements.txt
 ```
-┌─────────────────────────────────────────────────────────┐
-│              前端 (React + Vite + Tailwind)              │
-│  比赛创建 | 实时竞赛页 | 题库管理 | 历史回放 | 统计分析  │
-└───────────────────────┬─────────────────────────────────┘
-                        │ WebSocket + HTTP API
-┌───────────────────────┴─────────────────────────────────┐
-│                   后端 (FastAPI)                         │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │  Contest Manager | Agent Manager | Judge System │   │
-│  │  Debate Manager  | WebSocket Hub | Code Runner  │   │
-│  └─────────────────────────────────────────────────┘   │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-   PostgreSQL        Redis          Judge0
-   (数据存储)      (缓存/消息)    (代码执行)
+
+远期目标架构：
+
+```text
+React Frontend
+      │ HTTP + WebSocket
+      ▼
+FastAPI Backend
+      ├── Contest Manager
+      ├── Agent Manager
+      ├── Judge System
+      ├── Debate Manager
+      ├── WebSocket Hub
+      └── Code Runner
+      │
+      ├── PostgreSQL
+      ├── Redis
+      └── Judge0
 ```
 
-详细设计请查看 [📖 总体设计文档](./docs/总体设计.md)
+当前 MVP 的范围与后续决策基线见：[`docs/MVP开发构想.md`](./docs/MVP开发构想.md)。
 
-## 🛠️ 技术栈
+---
 
-### 后端
+## 技术栈
 
-| 技术              | 版本     | 用途                 |
-| ----------------- | -------- | -------------------- |
-| **FastAPI**       | 0.115+   | 高性能异步 Web 框架  |
-| **PostgreSQL**    | 16+      | 主数据库，支持 JSONB |
-| **Redis**         | 7+       | 缓存和消息队列       |
-| **SQLAlchemy**    | 2.0+     | 异步 ORM             |
-| **Judge0**        | CE 1.13+ | 代码执行沙箱         |
-| **OpenAI SDK**    | 最新     | GPT 模型接入         |
-| **Anthropic SDK** | 最新     | Claude 模型接入      |
-| **httpx**         | 最新     | 异步 HTTP 客户端     |
+### 当前已使用
 
-### 前端
+| 技术 | 版本 | 用途 |
+| --- | --- | --- |
+| Python | 3.11+ | 后端开发语言 |
+| FastAPI | 0.115.x | Web API 框架 |
+| SQLAlchemy async | 2.0.x | 异步 ORM |
+| SQLite + aiosqlite | 当前开发数据库 | 本地最小数据库 |
+| Pydantic Settings | 2.x | 环境变量配置 |
+| pytest | 8.x | 后端测试 |
+| httpx | 0.28.x | 测试/HTTP 客户端依赖 |
 
-| 技术              | 版本  | 用途       |
-| ----------------- | ----- | ---------- |
-| **React**         | 18+   | UI 框架    |
-| **TypeScript**    | 5+    | 类型安全   |
-| **Vite**          | 5+    | 构建工具   |
-| **Tailwind CSS**  | 3+    | 样式框架   |
-| **Shadcn UI**     | 最新  | 组件库     |
-| **Monaco Editor** | 0.52+ | 代码编辑器 |
-| **Zustand**       | 5+    | 状态管理   |
+### 后续计划接入
 
-### DevOps
+| 技术 | 用途 | 接入时机 |
+| --- | --- | --- |
+| Alembic | 数据库迁移 | 模型稳定后 |
+| PostgreSQL | 主数据库 | SQLite 主链路跑通后 |
+| Redis | 缓存/消息 | 比赛事件和队列需求明确后 |
+| Judge0 | 代码执行沙箱 | Judge 抽象稳定后 |
+| React + Vite | 前端界面 | 后端 API 和事件模型稳定后 |
+| WebSocket | 实时通信 | 比赛状态机稳定后 |
+| OpenAI / Anthropic / DeepSeek SDK | LLM Agent | MockAgent 跑通后 |
+| Docker Compose | 本地多服务编排 | PostgreSQL、Redis、Judge0 接入时 |
 
-- **Docker** + **Docker Compose** - 容器化部署
-- **Alembic** - 数据库迁移
-- **pytest** - 后端测试
-- **Vitest** - 前端测试
+---
 
-## 🚀 快速开始
+## 快速开始：当前后端最小版本
 
-### 环境准备
+### 1. 环境准备
 
-确保已安装：
-- **Docker** 和 **Docker Compose**
-- **Python 3.11+**
-- **Node.js 20+**
-- **Git**
+当前只需要：
 
-### 1. 克隆项目
+- Python 3.11+
+- Git
+
+暂不需要：
+
+- Docker
+- Node.js
+- PostgreSQL
+- Redis
+- Judge0
+- LLM API Key
+
+### 2. 克隆项目
 
 ```bash
 git clone https://github.com/AbelTomato/Multi-Agent-Algorithmic-Arena.git
 cd Multi-Agent-Algorithmic-Arena
 ```
 
-### 2. 配置环境变量
+### 3. 创建并激活虚拟环境
 
-```bash
-cp .env.example .env
+Windows PowerShell / CMD 示例：
+
+```bat
+python -m venv .venv
+.venv\Scripts\activate
 ```
 
-编辑 `.env` 文件，填入 API Keys：
+### 4. 安装后端依赖
+
+```bat
+cd backend
+python -m pip install -r requirements.txt
+```
+
+### 5. 配置环境变量
+
+当前环境变量示例位于：
+
+```text
+backend/.env.example
+```
+
+复制为本地 `.env`：
+
+```bat
+copy .env.example .env
+```
+
+当前 `.env.example` 内容：
 
 ```env
-# LLM API Keys
-OPENAI_API_KEY=your_openai_key
-ANTHROPIC_API_KEY=your_anthropic_key
-DEEPSEEK_API_KEY=your_deepseek_key
-
-# 数据库配置
-DATABASE_URL=postgresql://postgres:password@localhost:5432/arena
-REDIS_URL=redis://localhost:6379
-
-# Judge0 配置
-JUDGE0_URL=http://localhost:2358
+APP_NAME="Multi-Agent Algorithmic Arena API"
+DEBUG=true
+DATABASE_URL="sqlite+aiosqlite:///./arena.db"
 ```
 
-### 3. 启动开发环境
+说明：当前阶段不需要填写 OpenAI、Anthropic、DeepSeek、Redis、Judge0 等配置。
 
-```bash
-# 一键启动所有服务（PostgreSQL + Redis + Judge0 + 后端 + 前端）
-docker-compose up -d
+### 6. 运行测试
 
-# 查看日志
-docker-compose logs -f
+在 `backend/` 目录执行：
+
+```bat
+python -m pytest -q
 ```
 
-### 4. 初始化数据库
+预期结果：
 
-```bash
-# 进入后端容器
-docker-compose exec backend bash
-
-# 运行迁移
-alembic upgrade head
-
-# 导入示例题目（可选）
-python scripts/seed_problems.py
+```text
+8 passed
 ```
 
-### 5. 访问应用
+可能伴随若干 `DeprecationWarning`，现阶段可先记录，不作为失败处理。
 
-- **前端界面**：http://localhost:5173
-- **后端 API 文档**：http://localhost:8000/docs
-- **Judge0 API**：http://localhost:2358
+### 7. 启动后端服务
 
-## 📖 文档
+在 `backend/` 目录执行：
 
-- [📋 实施计划](./docs/实施计划.md) - 分阶段开发计划和里程碑
-- [🏗️ 总体设计](./docs/总体设计.md) - 架构设计和技术实现细节
-- [🔌 接口设计](./docs/接口设计.md) - API 接口和 WebSocket 事件协议（待补充）
-- [💾 数据结构设计](./docs/数据结构设计.md) - 数据库表结构（待补充）
-
-## 🎯 开发路线图
-
-### 阶段一：基础设施 ✅ (规划中)
-- [ ] 初始化后端项目结构
-- [ ] 初始化前端项目结构
-- [ ] 配置 Docker Compose
-- [ ] 数据库模型定义
-
-### 阶段二：Agent 系统 (规划中)
-- [ ] BaseAgent 抽象接口
-- [ ] OpenAI / Anthropic / DeepSeek 适配器
-- [ ] Agent Factory 工厂模式
-- [ ] 速度限制器
-
-### 阶段三：裁判系统 (规划中)
-- [ ] Judge0 集成
-- [ ] 评分逻辑实现
-- [ ] 裁判 Agent（代码质量评审）
-- [ ] 辩驳流程管理器
-
-### 阶段四：比赛引擎 (规划中)
-- [ ] 比赛状态机
-- [ ] WebSocket 连接管理
-- [ ] 多 Agent 并发调度
-
-### 阶段五：前端实现 (规划中)
-- [ ] 实时竞赛主界面
-- [ ] Agent 思考过程可视化
-- [ ] 人类选手代码编辑器
-- [ ] 题库管理
-
-### 阶段六：高级功能 (规划中)
-- [ ] Codeforces 题目导入
-- [ ] 比赛历史回放
-- [ ] 统计分析面板
-
-详细计划请查看 [📋 实施计划](./docs/实施计划.md)
-
-## 🤝 贡献指南
-
-欢迎贡献代码、报告问题或提出建议！
-
-### 开发流程
-
-1. Fork 本仓库
-2. 创建特性分支：`git checkout -b feature/your-feature`
-3. 提交更改：`git commit -m 'feat: add some feature'`
-4. 推送分支：`git push origin feature/your-feature`
-5. 提交 Pull Request
-
-### 提交规范
-
-遵循 Conventional Commits：
-
-```
-feat: 新功能
-fix: 修复 bug
-docs: 文档更新
-test: 测试相关
-refactor: 重构
-chore: 构建/依赖更新
+```bat
+python -m uvicorn app.main:app --reload
 ```
 
-### 代码风格
+访问：
 
-- **Python**：遵循 PEP 8，使用 `black` 格式化
-- **TypeScript/React**：遵循 Airbnb 风格，使用 `prettier` 格式化
+- 根路由：http://localhost:8000/
+- 健康检查：http://localhost:8000/health
+- API 文档：http://localhost:8000/docs
+- 题目列表：http://localhost:8000/api/problems
 
-## 📄 许可证
-
-本项目采用 MIT 许可证。详见 [LICENSE](./LICENSE) 文件。
-
-## 🙏 致谢
-
-- [FastAPI](https://fastapi.tiangolo.com/) - 现代化的 Python Web 框架
-- [Judge0](https://judge0.com/) - 开源的代码执行引擎
-- [Shadcn UI](https://ui.shadcn.com/) - 精美的 React 组件库
-- [OpenAI](https://openai.com/) / [Anthropic](https://anthropic.com/) / [DeepSeek](https://deepseek.com/) - 强大的 LLM 提供商
-
-## 📧 联系方式
-
-- **作者**：AbelTomato
-- **GitHub**：https://github.com/AbelTomato
-- **项目主页**：https://github.com/AbelTomato/Multi-Agent-Algorithmic-Arena
+当前 `/api/problems` 仍是路由骨架，会返回空列表。下一阶段会接入数据库查询。
 
 ---
 
-⭐ 如果这个项目对你有帮助，请给个 Star 支持一下！
+## 文档
+
+后续产品与技术决策以 [`docs/MVP开发构想.md`](./docs/MVP开发构想.md) 为唯一基线；旧的总体设计、实施计划和整改路线已删除，避免与当前 MVP 产生冲突。
+
+| 文档 | 说明 |
+| --- | --- |
+| [`docs/MVP开发构想.md`](./docs/MVP开发构想.md) | 当前 MVP 范围、已确认决策、暂不实现功能与未决事项；后续决策基线 |
+| [`docs/学习协作流程.md`](./docs/学习协作流程.md) | 本项目边学习边开发的协作方式 |
+| [`docs/学习笔记/Python项目结构与pytest.md`](./docs/学习笔记/Python项目结构与pytest.md) | Python 项目结构和 pytest 学习笔记 |
+| [`docs/决策记录/0001-采用混合式环境配置学习法.md`](./docs/决策记录/0001-采用混合式环境配置学习法.md) | 环境配置学习方式的历史决策记录 |
+
+---
+
+## 当前 MVP 路线图
+
+以 `docs/MVP开发构想.md` 的决策基线为准，按以下顺序推进：
+
+1. 接入 PostgreSQL，配置 Alembic migration 与题目 seed。
+2. 实现题目列表和题目详情 API，并补充 PostgreSQL 集成测试。
+3. 定义统一 Agent / Provider 抽象，实现 MockAgent。
+4. 实现同步 `POST /api/solutions`，由服务端统一生成 Prompt，并补充失败重试测试。
+5. 实现 React + Vite + TypeScript + shadcn/ui + Tailwind CSS 前端，展示 Markdown 解题结果。
+6. 部署 MockAgent 版本，验证 PostgreSQL、环境变量、CORS、白名单和健康检查。
+7. 根据成本预算确定部署平台与一个真实 LLM Provider，再实现对应适配器。
+
+当前不实现 Judge0、代码执行、评分、多 Agent、Redis、WebSocket、流式输出、历史记录或登录系统。
+
+---
+
+## 开发原则
+
+本项目采用学习式渐进开发：
+
+1. 先跑通最小闭环，再接复杂外部依赖。
+2. 每个切片都要有明确学习目标、构建目标和验证方式。
+3. 新功能优先配套测试。
+4. 不把本地运行时文件提交进 Git，例如 `.env`、SQLite 数据库、缓存文件。
+5. 文档要区分当前可运行状态和远期设计。
+
+---
+
+## 贡献说明
+
+当前项目仍处于个人学习与原型阶段，暂不按成熟开源项目流程运作。
+
+如果后续进入协作阶段，将补充：
+
+- `LICENSE`
+- issue 模板
+- PR 模板
+- 贡献指南
+- 代码风格和 CI 规则
+
+---
+
+## 许可证
+
+当前仓库尚未添加 `LICENSE` 文件。正式开源前需要明确许可证。
+
+---
+
+## 联系方式
+
+- 作者：AbelTomato
+- GitHub：https://github.com/AbelTomato
+- 项目主页：https://github.com/AbelTomato/Multi-Agent-Algorithmic-Arena
