@@ -42,7 +42,7 @@
 当前测试基线：
 
 ```text
-21 passed, 1 skipped
+24 passed, 1 skipped
 ```
 
 warnings 主要来自当前 Python 版本和依赖包的弃用提示，不阻塞现阶段学习开发。后续会评估将长期开发版本固定到 Python 3.11 或 3.12。
@@ -256,7 +256,7 @@ python -m pytest -q
 预期结果：
 
 ```text
-21 passed, 1 skipped
+24 passed, 1 skipped
 ```
 
 如果未设置 `TEST_DATABASE_URL`，PostgreSQL 集成测试会跳过；设置后应执行全部测试。当前环境验证结果为 `21 passed, 1 skipped`。
@@ -290,15 +290,14 @@ python -m app.seed
 
 ## 文档
 
-后续产品与技术决策以 [`docs/MVP开发构想.md`](./docs/MVP开发构想.md) 为唯一基线；旧的总体设计、实施计划和整改路线已删除，避免与当前 MVP 产生冲突。
+后续产品与技术决策以 [`docs/MVP开发构想.md`](./docs/MVP开发构想.md) 为唯一基线；已被替代的旧流程和决策文档已删除，当前实施计划与项目协作规则见下表。
 
 | 文档 | 说明 |
 | --- | --- |
 | [`docs/MVP开发构想.md`](./docs/MVP开发构想.md) | 当前 MVP 范围、已确认决策、暂不实现功能与未决事项；后续决策基线 |
 | [`docs/实施计划.md`](./docs/实施计划.md) | MVP 分阶段实施、测试、验收、部署和文档回填计划 |
-| [`docs/学习协作流程.md`](./docs/学习协作流程.md) | 本项目边学习边开发的协作方式 |
 | [`docs/学习笔记/Python项目结构与pytest.md`](./docs/学习笔记/Python项目结构与pytest.md) | Python 项目结构和 pytest 学习笔记 |
-| [`docs/决策记录/0001-采用混合式环境配置学习法.md`](./docs/决策记录/0001-采用混合式环境配置学习法.md) | 环境配置学习方式的历史决策记录 |
+| [`.clinerules/项目开发协作规则.md`](./.clinerules/项目开发协作规则.md) | 本项目代码、测试、文档和高危操作的协作规则 |
 
 ---
 
