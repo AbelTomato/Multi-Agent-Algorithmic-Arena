@@ -259,7 +259,7 @@ python -m pytest -q
 24 passed, 1 skipped
 ```
 
-如果未设置 `TEST_DATABASE_URL`，PostgreSQL 集成测试会跳过；设置后应执行全部测试。当前环境验证结果为 `21 passed, 1 skipped`。
+如果未设置 `TEST_DATABASE_URL`，PostgreSQL 集成测试会跳过；设置后应执行全部测试。当前环境验证结果为 `24 passed, 1 skipped`。
 
 ### 7. 启动后端服务
 
