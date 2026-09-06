@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,7 +9,8 @@ class Settings(BaseSettings):
 
     app_name: str = "Multi-Agent Algorithmic Arena API"
     debug: bool = True
-    database_url: str = "sqlite+aiosqlite:///./arena.db"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/multi_agent_arena"
+    agent_retry_count: int = Field(default=1, ge=0, le=3)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
