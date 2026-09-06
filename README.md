@@ -18,7 +18,13 @@
 - 配置管理：`backend/app/config.py`
 - SQLAlchemy async 基础数据库连接：`backend/app/database.py`
 - 最小 `Problem` 数据模型：`backend/app/models/problem.py`
-- 基础题目路由骨架：`GET /api/problems`
+- PostgreSQL 配置：`backend/.env.example`
+- Agent 重试配置：`AGENT_RETRY_COUNT`（默认失败后重试 1 次）
+- Alembic migration：`backend/alembic/`
+- 题目 seed：`backend/app/seed.py`
+- Problem API：`GET /api/problems`、`GET /api/problems/{problem_id}`
+- Agent 抽象与 MockAgent：`backend/app/agents/`
+- Solutions API：`POST /api/solutions`
 - 健康检查：`GET /health`
 - pytest 测试基线
 
@@ -26,11 +32,8 @@
 
 - React 前端
 - Docker Compose
-- PostgreSQL
 - Redis
 - Judge0 沙箱
-- Alembic 数据库迁移
-- Agent 抽象接口
 - LLM Provider 接入
 - WebSocket 实时通信
 - 比赛状态机
@@ -39,7 +42,7 @@
 当前测试基线：
 
 ```text
-8 passed, 26 warnings
+21 passed, 1 skipped
 ```
 
 warnings 主要来自当前 Python 版本和依赖包的弃用提示，不阻塞现阶段学习开发。后续会评估将长期开发版本固定到 Python 3.11 或 3.12。
@@ -96,6 +99,16 @@ backend/
 ├── app/
 │   ├── api/
 │   │   └── problems.py
+│   ├── schemas/
+│   │   └── problem.py
+│   ├── agents/
+│   │   ├── base.py
+│   │   ├── factory.py
+│   │   └── mock.py
+│   ├── providers/
+│   │   └── base.py
+│   ├── services/
+│   │   └── solutions.py
 │   ├── models/
 │   │   └── problem.py
 │   ├── config.py
@@ -105,7 +118,12 @@ backend/
 │   ├── test_config.py
 │   ├── test_health.py
 │   ├── test_problem_model.py
-│   └── test_problems_api.py
+│   ├── test_problems_api.py
+│   ├── test_problem_schemas.py
+│   ├── test_agents.py
+│   ├── test_solutions.py
+│   ├── test_seed.py
+│   └── test_postgres_integration.py
 ├── .env.example
 ├── pyproject.toml
 └── requirements.txt
@@ -143,7 +161,8 @@ FastAPI Backend
 | Python | 3.11+ | 后端开发语言 |
 | FastAPI | 0.115.x | Web API 框架 |
 | SQLAlchemy async | 2.0.x | 异步 ORM |
-| SQLite + aiosqlite | 当前开发数据库 | 本地最小数据库 |
+| PostgreSQL + asyncpg | MVP 主数据库 | 题目、migration 和 seed |
+| SQLite + aiosqlite | 仅用于现有快速单元测试 | 不作为 MVP 运行数据库 |
 | Pydantic Settings | 2.x | 环境变量配置 |
 | pytest | 8.x | 后端测试 |
 | httpx | 0.28.x | 测试/HTTP 客户端依赖 |
@@ -152,8 +171,6 @@ FastAPI Backend
 
 | 技术 | 用途 | 接入时机 |
 | --- | --- | --- |
-| Alembic | 数据库迁移 | 模型稳定后 |
-| PostgreSQL | 主数据库 | SQLite 主链路跑通后 |
 | Redis | 缓存/消息 | 比赛事件和队列需求明确后 |
 | Judge0 | 代码执行沙箱 | Judge 抽象稳定后 |
 | React + Vite | 前端界面 | 后端 API 和事件模型稳定后 |
@@ -167,16 +184,16 @@ FastAPI Backend
 
 ### 1. 环境准备
 
-当前只需要：
+当前需要：
 
 - Python 3.11+
 - Git
+- PostgreSQL
 
 暂不需要：
 
 - Docker
 - Node.js
-- PostgreSQL
 - Redis
 - Judge0
 - LLM API Key
@@ -223,10 +240,10 @@ copy .env.example .env
 ```env
 APP_NAME="Multi-Agent Algorithmic Arena API"
 DEBUG=true
-DATABASE_URL="sqlite+aiosqlite:///./arena.db"
+DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/multi_agent_arena"
 ```
 
-说明：当前阶段不需要填写 OpenAI、Anthropic、DeepSeek、Redis、Judge0 等配置。
+说明：`DATABASE_URL` 需要替换为本机或部署环境中的真实 PostgreSQL 连接串。当前阶段不需要填写 OpenAI、Anthropic、DeepSeek、Redis、Judge0 等配置。
 
 ### 6. 运行测试
 
@@ -239,10 +256,10 @@ python -m pytest -q
 预期结果：
 
 ```text
-8 passed
+21 passed, 1 skipped
 ```
 
-可能伴随若干 `DeprecationWarning`，现阶段可先记录，不作为失败处理。
+如果未设置 `TEST_DATABASE_URL`，PostgreSQL 集成测试会跳过；设置后应执行全部测试。当前环境验证结果为 `21 passed, 1 skipped`。
 
 ### 7. 启动后端服务
 
@@ -258,8 +275,16 @@ python -m uvicorn app.main:app --reload
 - 健康检查：http://localhost:8000/health
 - API 文档：http://localhost:8000/docs
 - 题目列表：http://localhost:8000/api/problems
+- 解题接口：`POST http://localhost:8000/api/solutions`
 
-当前 `/api/problems` 仍是路由骨架，会返回空列表。下一阶段会接入数据库查询。
+当前阶段已经完成 PostgreSQL migration、seed、Problem API、Agent 抽象、MockAgent 和 Solutions API；数据库 Engine 按应用复用，Session 按请求创建。在运行 API 前，需要先执行 migration 和 seed。
+
+在 `backend/` 目录执行：
+
+```bat
+python -m alembic upgrade head
+python -m app.seed
+```
 
 ---
 
@@ -270,6 +295,7 @@ python -m uvicorn app.main:app --reload
 | 文档 | 说明 |
 | --- | --- |
 | [`docs/MVP开发构想.md`](./docs/MVP开发构想.md) | 当前 MVP 范围、已确认决策、暂不实现功能与未决事项；后续决策基线 |
+| [`docs/实施计划.md`](./docs/实施计划.md) | MVP 分阶段实施、测试、验收、部署和文档回填计划 |
 | [`docs/学习协作流程.md`](./docs/学习协作流程.md) | 本项目边学习边开发的协作方式 |
 | [`docs/学习笔记/Python项目结构与pytest.md`](./docs/学习笔记/Python项目结构与pytest.md) | Python 项目结构和 pytest 学习笔记 |
 | [`docs/决策记录/0001-采用混合式环境配置学习法.md`](./docs/决策记录/0001-采用混合式环境配置学习法.md) | 环境配置学习方式的历史决策记录 |
