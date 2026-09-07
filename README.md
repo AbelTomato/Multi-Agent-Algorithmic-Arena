@@ -6,7 +6,7 @@
 
 > 一个学习式渐进开发项目。远期目标是构建“多智能体算法竞技场”：多个 AI Agents 同台解算法题，由裁判系统评测代码，并支持辩驳、人机对战和实时观赛。
 
-当前仓库不是完整产品，而是后端最小切片阶段。README 按当前真实状态编写，远期能力会在后续阶段逐步接入。
+当前仓库不是完整产品，而是单 Agent 算法题解答演示 MVP。README 按当前真实状态编写，远期能力会在后续阶段逐步接入。
 
 ---
 
@@ -25,12 +25,13 @@
 - Problem API：`GET /api/problems`、`GET /api/problems/{problem_id}`
 - Agent 抽象与 MockAgent：`backend/app/agents/`
 - Solutions API：`POST /api/solutions`
+- React 前端：`frontend/`
+- 前端题目浏览、详情加载、解题请求和 Markdown 结果展示
 - 健康检查：`GET /health`
-- pytest 测试基线
+- 后端 pytest 与前端 Vitest 测试基线
 
 当前尚未实现：
 
-- React 前端
 - Docker Compose
 - Redis
 - Judge0 沙箱
@@ -42,7 +43,7 @@
 当前测试基线：
 
 ```text
-24 passed, 1 skipped
+后端：29 passed, 1 skipped；前端：8 passed
 ```
 
 warnings 主要来自当前 Python 版本和依赖包的弃用提示，不阻塞现阶段学习开发。后续会评估将长期开发版本固定到 Python 3.11 或 3.12。
@@ -95,6 +96,21 @@ warnings 主要来自当前 Python 版本和依赖包的弃用提示，不阻塞
 当前实际架构：
 
 ```text
+frontend/
+├── src/
+│   ├── components/
+│   │   ├── markdown-content.tsx
+│   │   └── ui/
+│   ├── lib/
+│   │   ├── api.ts
+│   │   └── utils.ts
+│   ├── App.tsx
+│   └── main.tsx
+├── .env.example
+├── package.json
+├── vite.config.ts
+└── vitest.config.ts
+
 backend/
 ├── app/
 │   ├── api/
@@ -166,6 +182,10 @@ FastAPI Backend
 | Pydantic Settings | 2.x | 环境变量配置 |
 | pytest | 8.x | 后端测试 |
 | httpx | 0.28.x | 测试/HTTP 客户端依赖 |
+| React + Vite + TypeScript | 前端界面 | 当前 MVP |
+| Tailwind CSS + shadcn/ui 风格组件 | 前端样式和基础 UI | 当前 MVP |
+| react-markdown + remark-gfm | 题面和 Agent 结果 Markdown 渲染 | 当前 MVP |
+| Vitest + React Testing Library | 前端测试 | 当前 MVP |
 
 ### 后续计划接入
 
@@ -173,14 +193,13 @@ FastAPI Backend
 | --- | --- | --- |
 | Redis | 缓存/消息 | 比赛事件和队列需求明确后 |
 | Judge0 | 代码执行沙箱 | Judge 抽象稳定后 |
-| React + Vite | 前端界面 | 后端 API 和事件模型稳定后 |
 | WebSocket | 实时通信 | 比赛状态机稳定后 |
 | OpenAI / Anthropic / DeepSeek SDK | LLM Agent | MockAgent 跑通后 |
 | Docker Compose | 本地多服务编排 | PostgreSQL、Redis、Judge0 接入时 |
 
 ---
 
-## 快速开始：当前后端最小版本
+## 快速开始：当前 MVP
 
 ### 1. 环境准备
 
@@ -189,11 +208,12 @@ FastAPI Backend
 - Python 3.11+
 - Git
 - PostgreSQL
+- Node.js 20+
+- npm
 
 暂不需要：
 
 - Docker
-- Node.js
 - Redis
 - Judge0
 - LLM API Key
@@ -241,11 +261,29 @@ copy .env.example .env
 APP_NAME="Multi-Agent Algorithmic Arena API"
 DEBUG=true
 DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/multi_agent_arena"
+AGENT_RETRY_COUNT=1
+CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
 ```
 
-说明：`DATABASE_URL` 需要替换为本机或部署环境中的真实 PostgreSQL 连接串。当前阶段不需要填写 OpenAI、Anthropic、DeepSeek、Redis、Judge0 等配置。
+说明：`DATABASE_URL` 需要替换为本机或部署环境中的真实 PostgreSQL 连接串。`CORS_ORIGINS` 使用逗号分隔的前端来源列表，不要在生产环境使用 `*`。当前阶段不需要填写 OpenAI、Anthropic、DeepSeek、Redis、Judge0 等配置。
 
-### 6. 运行测试
+前端环境变量示例位于 `frontend/.env.example`：
+
+```env
+VITE_API_BASE_URL=
+```
+
+本地开发时留空，Vite 会将 `/api` 和 `/health` 代理到 `http://localhost:8000`；部署前端时填写后端 API 的公开地址。
+
+### 6. 安装前端依赖
+
+在 `frontend/` 目录执行：
+
+```bat
+npm install
+```
+
+### 7. 运行测试
 
 在 `backend/` 目录执行：
 
@@ -256,18 +294,45 @@ python -m pytest -q
 预期结果：
 
 ```text
-24 passed, 1 skipped
+29 passed, 1 skipped
 ```
 
-如果未设置 `TEST_DATABASE_URL`，PostgreSQL 集成测试会跳过；设置后应执行全部测试。当前环境验证结果为 `24 passed, 1 skipped`。
+如果未设置 `TEST_DATABASE_URL`，PostgreSQL 集成测试会跳过；设置后应执行全部测试。当前环境验证结果为 `29 passed, 1 skipped`。
 
-### 7. 启动后端服务
+前端测试和生产构建在 `frontend/` 目录执行：
+
+```bat
+npm test -- --run
+npm run build
+```
+
+当前环境验证结果为 `8 passed`，生产构建通过。
+
+阶段 6 的真实跨域联调可以临时将 `frontend/.env.local` 设置为：
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+此时前端会绕过 Vite proxy，直接请求后端，并由后端 `CORS_ORIGINS` 校验来源。`.env.local` 不应提交到 Git。
+
+### 8. 启动后端服务
 
 在 `backend/` 目录执行：
 
 ```bat
 python -m uvicorn app.main:app --reload
 ```
+
+### 9. 启动前端开发服务
+
+在 `frontend/` 目录执行：
+
+```bat
+npm run dev
+```
+
+默认访问 http://localhost:5173。后端和前端同时启动后，可以按照“题目列表 → 题目详情 → 让 Agent 解题”的流程验证 MockAgent 闭环。
 
 访问：
 
@@ -314,6 +379,8 @@ python -m app.seed
 7. 根据成本预算确定部署平台与一个真实 LLM Provider，再实现对应适配器。
 
 当前不实现 Judge0、代码执行、评分、多 Agent、Redis、WebSocket、流式输出、历史记录或登录系统。
+
+当前阶段 6 已实现可配置 CORS Middleware；具体反向代理、TLS、访问白名单、限流和 `X-Forwarded-*` 信任策略待部署平台确定后处理。
 
 ---
 
