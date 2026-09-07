@@ -11,8 +11,15 @@ class Settings(BaseSettings):
     debug: bool = True
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/multi_agent_arena"
     agent_retry_count: int = Field(default=1, ge=0, le=3)
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """将逗号分隔的来源配置转换为 CORS Middleware 使用的列表。"""
+
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 @lru_cache
