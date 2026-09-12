@@ -27,18 +27,21 @@
 - Solutions API：`POST /api/solutions`
 - React 前端：`frontend/`
 - 前端题目浏览、详情加载、解题请求和 Markdown 结果展示
+- Docker Compose 部署编排：`compose.yaml`
+- 后端 Dockerfile 与 Nginx 部署模板
+- Alibaba Cloud Linux 3 ECS 公网 IP + HTTP 部署验证
 - 健康检查：`GET /health`
 - 后端 pytest 与前端 Vitest 测试基线
 
 当前尚未实现：
 
-- Docker Compose
 - Redis
 - Judge0 沙箱
 - LLM Provider 接入
 - WebSocket 实时通信
 - 比赛状态机
 - 裁判与辩驳系统
+- 正式域名 DNS、HTTPS/Certbot、密码轮换和异地备份
 
 当前测试基线：
 
@@ -361,6 +364,7 @@ python -m app.seed
 | --- | --- |
 | [`docs/MVP开发构想.md`](./docs/MVP开发构想.md) | 当前 MVP 范围、已确认决策、暂不实现功能与未决事项；后续决策基线 |
 | [`docs/实施计划.md`](./docs/实施计划.md) | MVP 分阶段实施、测试、验收、部署和文档回填计划 |
+| [`docs/部署方案-Nginx与Docker.md`](./docs/部署方案-Nginx与Docker.md) | Alibaba Cloud Linux 3 ECS、Nginx、Docker Compose、PostgreSQL 和部署验收说明 |
 | [`docs/学习笔记/Python项目结构与pytest.md`](./docs/学习笔记/Python项目结构与pytest.md) | Python 项目结构和 pytest 学习笔记 |
 | [`.clinerules/项目开发协作规则.md`](./.clinerules/项目开发协作规则.md) | 本项目代码、测试、文档和高危操作的协作规则 |
 
@@ -370,17 +374,17 @@ python -m app.seed
 
 以 `docs/MVP开发构想.md` 的决策基线为准，按以下顺序推进：
 
-1. 接入 PostgreSQL，配置 Alembic migration 与题目 seed。
-2. 实现题目列表和题目详情 API，并补充 PostgreSQL 集成测试。
-3. 定义统一 Agent / Provider 抽象，实现 MockAgent。
-4. 实现同步 `POST /api/solutions`，由服务端统一生成 Prompt，并补充失败重试测试。
-5. 实现 React + Vite + TypeScript + shadcn/ui + Tailwind CSS 前端，展示 Markdown 解题结果。
-6. 部署 MockAgent 版本，验证 PostgreSQL、环境变量、CORS、白名单和健康检查。
-7. 根据成本预算确定部署平台与一个真实 LLM Provider，再实现对应适配器。
+1. ✅ 已完成：PostgreSQL、Alembic migration 与可重复 seed。
+2. ✅ 已完成：Problem 列表/详情 API；PostgreSQL 集成测试仍需独立测试库才能执行。
+3. ✅ 已完成：统一 Agent / Provider 抽象与 MockAgent。
+4. ✅ 已完成：同步 `POST /api/solutions`、服务端 Prompt 和失败重试。
+5. ✅ 已完成：React + Vite + TypeScript 前端及 Markdown 结果展示。
+6. ✅ 已完成：Alibaba Cloud Linux 3 ECS 上的 Docker Compose + Nginx + PostgreSQL + FastAPI 部署及公网 IP 联调。
+7. ⏳ 下一阶段：完成域名 HTTPS/安全收口后，依据成本和可用 API 选择一个真实 LLM Provider。
 
 当前不实现 Judge0、代码执行、评分、多 Agent、Redis、WebSocket、流式输出、历史记录或登录系统。
 
-当前阶段 6 已实现可配置 CORS Middleware；具体反向代理、TLS、访问白名单、限流和 `X-Forwarded-*` 信任策略待部署平台确定后处理。
+当前阶段 6 的 CORS Middleware 已实现；阶段 7 已在 Alibaba Cloud Linux 3 ECS 上完成 Docker/Nginx/公网 IP 联调。正式域名 DNS、TLS/Certbot、密码轮换、异地备份和恢复演练仍未完成。
 
 ---
 

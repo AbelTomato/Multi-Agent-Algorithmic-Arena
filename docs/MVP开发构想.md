@@ -216,6 +216,7 @@ MVP 前端只需要实现：
 
 ### 十一、当前仍未决的事项
 
-1. **部署平台**：根据成本预算决定，属于第 8 项决策，暂不预设具体平台。
-2. **具体 LLM Provider**：根据成本预算和可用 API 决定，Provider 统一抽象不受该选择影响。
-3. **具体模型及其参数**：在 Provider 确定后设置模型名称、最大输出长度、超时和重试参数。
+1. **部署平台**：已选择 Alibaba Cloud Linux 3 ECS（2 vCPU、约 2 GiB RAM），采用宿主机 Nginx + Docker Compose（PostgreSQL/FastAPI）部署；当前通过公网 IP + HTTP 提供验证环境。
+2. **正式域名与 HTTPS**：`tomato-agent-arena.me` 仍在 ICP 审核中，DNS 正式切换、Nginx `server_name`、Certbot 和 HTTPS 尚未完成。
+3. **具体 LLM Provider**：根据成本预算和可用 API 决定，Provider 统一抽象不受该选择影响。
+4. **具体模型及其参数**：在 Provider 确定后设置模型名称、最大输出长度、超时和重试参数。
