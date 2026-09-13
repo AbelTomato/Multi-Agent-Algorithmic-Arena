@@ -8,7 +8,7 @@
 - 使用 MockAgent；
 - 不部署 Redis；
 - 不部署 Judge0；
-- 不部署真实 LLM Provider；
+- 真实 LLM Provider 默认不启用；如完成 API Key、额度、访问控制和 HTTPS 收口，可通过后端环境变量启用 OpenAI Compatible Provider；
 - 不包含 WebSocket、异步任务和多副本高可用。
 
 明确该方案属于：

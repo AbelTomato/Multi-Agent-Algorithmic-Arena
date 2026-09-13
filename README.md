@@ -24,6 +24,7 @@
 - 题目 seed：`backend/app/seed.py`
 - Problem API：`GET /api/problems`、`GET /api/problems/{problem_id}`
 - Agent 抽象与 MockAgent：`backend/app/agents/`
+- OpenAI Compatible Provider：`backend/app/providers/openai_compatible.py`
 - Solutions API：`POST /api/solutions`
 - React 前端：`frontend/`
 - 前端题目浏览、详情加载、解题请求和 Markdown 结果展示
@@ -37,7 +38,6 @@
 
 - Redis
 - Judge0 沙箱
-- LLM Provider 接入
 - WebSocket 实时通信
 - 比赛状态机
 - 裁判与辩驳系统
@@ -46,7 +46,7 @@
 当前测试基线：
 
 ```text
-后端：29 passed, 1 skipped；前端：8 passed
+后端：38 passed, 1 skipped；前端：8 passed
 ```
 
 warnings 主要来自当前 Python 版本和依赖包的弃用提示，不阻塞现阶段学习开发。后续会评估将长期开发版本固定到 Python 3.11 或 3.12。
@@ -230,16 +230,16 @@ cd Multi-Agent-Algorithmic-Arena
 
 ### 3. 创建并激活虚拟环境
 
-Windows PowerShell / CMD 示例：
+WSL/Linux 示例：
 
-```bat
+```bash
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
 ```
 
 ### 4. 安装后端依赖
 
-```bat
+```bash
 cd backend
 python -m pip install -r requirements.txt
 ```
@@ -254,8 +254,8 @@ backend/.env.example
 
 复制为本地 `.env`：
 
-```bat
-copy .env.example .env
+```bash
+cp .env.example .env
 ```
 
 当前 `.env.example` 内容：
@@ -266,9 +266,15 @@ DEBUG=true
 DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/multi_agent_arena"
 AGENT_RETRY_COUNT=1
 CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
+LLM_PROVIDER=mock
+LLM_API_KEY=
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=
+LLM_TIMEOUT_SECONDS=30
+LLM_MAX_TOKENS=4096
 ```
 
-说明：`DATABASE_URL` 需要替换为本机或部署环境中的真实 PostgreSQL 连接串。`CORS_ORIGINS` 使用逗号分隔的前端来源列表，不要在生产环境使用 `*`。当前阶段不需要填写 OpenAI、Anthropic、DeepSeek、Redis、Judge0 等配置。
+说明：`DATABASE_URL` 需要替换为本机或部署环境中的真实 PostgreSQL 连接串。`CORS_ORIGINS` 使用逗号分隔的前端来源列表，不要在生产环境使用 `*`。默认 `LLM_PROVIDER=mock`，不需要 API Key 即可运行。若要启用 OpenAI Compatible 接口，需要在后端环境变量中设置 `LLM_PROVIDER=openai_compatible`、`LLM_API_KEY`、`LLM_MODEL`，并按服务商填写 `LLM_BASE_URL`。API Key 不得提交到 Git、前端或日志；额度和费用限额应在 API Key 所属平台配置。
 
 前端环境变量示例位于 `frontend/.env.example`：
 
@@ -282,7 +288,7 @@ VITE_API_BASE_URL=
 
 在 `frontend/` 目录执行：
 
-```bat
+```bash
 npm install
 ```
 
@@ -290,21 +296,21 @@ npm install
 
 在 `backend/` 目录执行：
 
-```bat
+```bash
 python -m pytest -q
 ```
 
 预期结果：
 
 ```text
-29 passed, 1 skipped
+38 passed, 1 skipped
 ```
 
-如果未设置 `TEST_DATABASE_URL`，PostgreSQL 集成测试会跳过；设置后应执行全部测试。当前环境验证结果为 `29 passed, 1 skipped`。
+如果未设置 `TEST_DATABASE_URL`，PostgreSQL 集成测试会跳过；设置后应执行全部测试。当前环境验证结果为 `38 passed, 1 skipped`。
 
 前端测试和生产构建在 `frontend/` 目录执行：
 
-```bat
+```bash
 npm test -- --run
 npm run build
 ```
@@ -323,7 +329,7 @@ VITE_API_BASE_URL=http://localhost:8000
 
 在 `backend/` 目录执行：
 
-```bat
+```bash
 python -m uvicorn app.main:app --reload
 ```
 
@@ -331,7 +337,7 @@ python -m uvicorn app.main:app --reload
 
 在 `frontend/` 目录执行：
 
-```bat
+```bash
 npm run dev
 ```
 
@@ -380,11 +386,11 @@ python -m app.seed
 4. ✅ 已完成：同步 `POST /api/solutions`、服务端 Prompt 和失败重试。
 5. ✅ 已完成：React + Vite + TypeScript 前端及 Markdown 结果展示。
 6. ✅ 已完成：Alibaba Cloud Linux 3 ECS 上的 Docker Compose + Nginx + PostgreSQL + FastAPI 部署及公网 IP 联调。
-7. ⏳ 下一阶段：完成域名 HTTPS/安全收口后，依据成本和可用 API 选择一个真实 LLM Provider。
+7. ✅ 已完成：OpenAI Compatible Provider 适配器和配置驱动的 Agent 工厂；默认仍使用 MockAgent，生产环境可通过后端环境变量显式启用真实 Provider。
 
 当前不实现 Judge0、代码执行、评分、多 Agent、Redis、WebSocket、流式输出、历史记录或登录系统。
 
-当前阶段 6 的 CORS Middleware 已实现；阶段 7 已在 Alibaba Cloud Linux 3 ECS 上完成 Docker/Nginx/公网 IP 联调。正式域名 DNS、TLS/Certbot、密码轮换、异地备份和恢复演练仍未完成。
+当前阶段 6 的 CORS Middleware 已实现；阶段 7 已在 Alibaba Cloud Linux 3 ECS 上完成 Docker/Nginx/公网 IP 联调；阶段 8 已完成 OpenAI Compatible Provider 的代码和 mock 测试，但尚未在本次开发中配置真实 API Key、调用真实模型或重新部署 ECS。正式域名 DNS、TLS/Certbot、密码轮换、异地备份和恢复演练仍未完成。
 
 ---
 

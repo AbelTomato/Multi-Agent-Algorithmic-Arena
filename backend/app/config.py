@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/multi_agent_arena"
     agent_retry_count: int = Field(default=1, ge=0, le=3)
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    llm_provider: str = "mock"
+    llm_api_key: SecretStr | None = None
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = ""
+    llm_timeout_seconds: float = Field(default=30.0, gt=0)
+    llm_max_tokens: int = Field(default=4096, gt=0)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
