@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Multi-Agent Algorithmic Arena PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=10m
+Unit=multi-agent-arena-postgres-backup.service
+
+[Install]
+WantedBy=timers.target

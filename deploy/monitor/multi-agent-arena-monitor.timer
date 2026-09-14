@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Multi-Agent Algorithmic Arena runtime health checks
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+RandomizedDelaySec=30s
+Unit=multi-agent-arena-monitor.service
+
+[Install]
+WantedBy=timers.target
