@@ -144,11 +144,11 @@ MVP 采用同步调用和一次性响应：后端读取题目、调用 Agent、�
 统一 Agent 接口
 → MockAgent
 → 验证完整业务闭环
-→ 根据成本预算选择一个真实 Provider
-→ 实现该 Provider 的具体适配器
+→ 根据成本预算配置一个真实 Provider
+→ OpenAI Compatible Provider 适配器
 ```
 
-初期只实现一个真实 Provider，不同时接入多个厂商。具体 Provider 暂未决定。
+初期只实现一个真实 Provider，不同时接入多个厂商。当前选择 OpenAI Compatible 接口，以兼容 OpenAI 风格的 Chat Completions 服务；默认仍使用 MockAgent。
 
 ### 七、用户与访问控制
 
@@ -193,7 +193,7 @@ MVP 前端只需要实现：
 - 前端页面；
 - 自动化测试。
 
-部署时先使用 MockAgent 验证前后端、PostgreSQL、环境变量、CORS、白名单和健康检查链路，部署稳定后再配置真实 LLM Provider。
+部署时先使用 MockAgent 验证前后端、PostgreSQL、环境变量、CORS、白名单和健康检查链路；部署稳定后可在 Provider 平台配置额度和费用限额，再通过后端环境变量启用 OpenAI Compatible Provider。API Key 不进入前端、Git 或日志。
 
 ### 十、明确暂不实现的功能
 
@@ -218,5 +218,5 @@ MVP 前端只需要实现：
 
 1. **部署平台**：已选择 Alibaba Cloud Linux 3 ECS（2 vCPU、约 2 GiB RAM），采用宿主机 Nginx + Docker Compose（PostgreSQL/FastAPI）部署；当前通过公网 IP + HTTP 提供验证环境。
 2. **正式域名与 HTTPS**：`tomato-agent-arena.me` 仍在 ICP 审核中，DNS 正式切换、Nginx `server_name`、Certbot 和 HTTPS 尚未完成。
-3. **具体 LLM Provider**：根据成本预算和可用 API 决定，Provider 统一抽象不受该选择影响。
-4. **具体模型及其参数**：在 Provider 确定后设置模型名称、最大输出长度、超时和重试参数。
+3. **真实 Provider 生产启用**：OpenAI Compatible Provider 适配器已完成；尚未执行真实 API 请求或 ECS 重新部署。
+4. **具体模型及其参数**：生产启用前设置模型名称、最大输出长度、超时和重试参数，并在 Provider 平台配置额度和费用限额。

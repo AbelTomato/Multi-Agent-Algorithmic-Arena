@@ -5,10 +5,11 @@
 明确当前部署的是：
 
 - 单 Agent 算法题解答 MVP；
-- 使用 MockAgent；
+- 本地和公开样例默认使用 MockAgent；
+- ECS 灰度环境已通过后端环境变量启用 OpenAI Compatible Provider，并完成一次受控真实请求验证；
 - 不部署 Redis；
 - 不部署 Judge0；
-- 真实 LLM Provider 默认不启用；如完成 API Key、额度、访问控制和 HTTPS 收口，可通过后端环境变量启用 OpenAI Compatible Provider；
+- 灰度环境尚未完成安全组来源限制、Nginx 限流、专用 Key 额度/告警和 HTTPS 收口，不应视为匿名公开或正式生产服务；
 - 不包含 WebSocket、异步任务和多副本高可用。
 
 明确该方案属于：
@@ -179,8 +180,8 @@ volumes:
 已落地样例：
 
 ```text
-d:\AbelTomato_Files\Developer\Projects\Multi-Agent-Algorithmic-Arena\compose.yaml
-d:\AbelTomato_Files\Developer\Projects\Multi-Agent-Algorithmic-Arena\.env.deploy.example
+compose.yaml
+.env.deploy.example
 ```
 
 建议服务：
@@ -289,7 +290,7 @@ location / {
 已落地模板：
 
 ```text
-d:\AbelTomato_Files\Developer\Projects\Multi-Agent-Algorithmic-Arena\deploy\nginx\multi-agent-arena.conf
+deploy/nginx/multi-agent-arena.conf
 ```
 
 主要职责：
@@ -416,7 +417,7 @@ sudo firewall-cmd --reload
 已落地公开样例：
 
 ```text
-d:\AbelTomato_Files\Developer\Projects\Multi-Agent-Algorithmic-Arena\.env.deploy.example
+.env.deploy.example
 ```
 
 示例只包含占位符：
@@ -563,7 +564,7 @@ docker compose exec -T postgres \
 
 ## 15. 测试和验收
 
-### 15.1 2026-09-10 实际验证状态
+### 15.1 2026-09-13 实际验证状态
 
 - ECS：Alibaba Cloud Linux 3.2104 U13.2，2 vCPU，约 1.8 GiB RAM，2 GiB Swap；
 - Docker Engine：26.1.3；Docker Compose：v2.27.0；Nginx：1.24.0；
@@ -571,14 +572,17 @@ docker compose exec -T postgres \
 - Alembic：`0001 (head)`；seed：2 道题，重复 seed 插入 0 条；
 - `http://127.0.0.1:8000/health`、`http://127.0.0.1/health`、`http://127.0.0.1/api/problems` 均返回 HTTP 200；
 - `http://47.119.120.86` 前端页面可访问，并通过同源 `/api` 完成公网联调；
-- 尚未完成：正式域名、HTTPS、Certbot 自动续期、正式白名单、密码轮换、异地备份和恢复演练。
+- 2026-09-13 候选镜像 `app-backend:412ba74` 已在 ECS 重建并健康运行；`/health`、`/api/problems` 的本机及公网 IP 访问返回 HTTP 200；
+- 已完成一次 PostgreSQL 备份，文件权限为 `600`；
+- 已完成一次受控真实 LLM 请求，网页端能够返回解题结果；
+- 尚未完成：安全组正式白名单、Nginx `/api/solutions` 限流和 429 验证、专用 Key 额度/费用告警、密码轮换、异地备份和恢复演练、正式域名、HTTPS 和 Certbot 自动续期。
 
 ### 15.2 验证命令模板
 
 本地验证：
 
 ```powershell
-Set-Location "d:\AbelTomato_Files\Developer\Projects\Multi-Agent-Algorithmic-Arena\backend"
+cd backend
 python -m pytest -q
 python -m compileall -q app alembic tests
 
