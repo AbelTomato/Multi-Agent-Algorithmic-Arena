@@ -57,6 +57,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("题目列表")).toBeInTheDocument();
+    expect(screen.getByText("MVP · 单 Agent")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /Two Sum/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Valid Parentheses/ })).toBeInTheDocument();
 
@@ -74,7 +75,7 @@ describe("App", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse([]));
     render(<App />);
 
-    expect(await screen.findByText("暂无可用题目。")).toBeInTheDocument();
+    expect(await screen.findByText("暂无可用题目")).toBeInTheDocument();
     expect(screen.getByText("选择一道题目开始")).toBeInTheDocument();
   });
 
@@ -88,7 +89,7 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /Two Sum/ }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("题目不存在，可能已经被移除。");
+    expect(await screen.findByRole("alert")).toHaveTextContent("题目不存在，可能已被移除");
   });
 
   it("shows solution loading state, renders Markdown and keeps the solve button disabled", async () => {
@@ -99,7 +100,7 @@ describe("App", () => {
     fireEvent.click(solveButton);
 
     expect(screen.getByRole("button", { name: "正在生成解题结果…" })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Agent 正在分析题目");
+    expect(screen.getByRole("status")).toHaveTextContent("正在生成解法");
     expect(await screen.findByRole("heading", { name: "解题思路" })).toBeInTheDocument();
     const codeBlock = document.querySelector("pre code");
     expect(codeBlock).toHaveTextContent("def two_sum():");
@@ -119,8 +120,72 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "让 Agent 解题" }));
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "Agent 暂时无法生成解题结果，请稍后重试。",
+        "暂时没生成出解题结果，稍后再试",
       );
+    });
+  });
+
+  it("shows a short message when requests are rate limited", async () => {
+    await selectFirstProblemWithSolutionRateLimit();
+
+    fireEvent.click(screen.getByRole("button", { name: "让 Agent 解题" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("请求有点频繁，稍后再试");
+    });
+  });
+
+  it("ignores a solution response after switching to another problem", async () => {
+    let resolveSolution: ((response: Response) => void) | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/problems")) {
+        return jsonResponse(problems);
+      }
+      if (url.endsWith("/api/problems/1")) {
+        return jsonResponse(problemDetail);
+      }
+      if (url.endsWith("/api/problems/2")) {
+        return jsonResponse({
+          id: 2,
+          slug: "valid-parentheses",
+          title: "Valid Parentheses",
+          description: "# Valid Parentheses\n\nCheck pairs.",
+        });
+      }
+      if (url.endsWith("/api/solutions")) {
+        return new Promise<Response>((resolve) => {
+          resolveSolution = resolve;
+        });
+      }
+      throw new Error(`Unexpected request: ${url} ${init?.method ?? "GET"}`);
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Two Sum/ }));
+    await screen.findByRole("heading", { name: "Two Sum", level: 2 });
+    fireEvent.click(screen.getByRole("button", { name: "让 Agent 解题" }));
+
+    const solutionRequest = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith("/api/solutions"),
+    );
+    expect(solutionRequest?.[1]).toMatchObject({ signal: expect.any(AbortSignal) });
+
+    fireEvent.click(screen.getByRole("button", { name: /Valid Parentheses/ }));
+    expect(
+      await screen.findByRole("heading", { name: "Valid Parentheses", level: 2 }),
+    ).toBeInTheDocument();
+    expect((solutionRequest?.[1] as RequestInit).signal).toHaveProperty("aborted", true);
+
+    resolveSolution?.(
+      jsonResponse({
+        problem_id: 1,
+        result: "## 解题思路\n\n```python\ndef two_sum():\n    pass\n```",
+        language: "python",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "解题思路" })).not.toBeInTheDocument();
     });
   });
 });
@@ -135,6 +200,21 @@ async function selectFirstProblemWithSolutionFailure() {
       return jsonResponse(problemDetail);
     }
     return jsonResponse({ detail: "Agent failed to generate a solution" }, 502);
+  });
+  await selectFirstProblem();
+}
+
+
+async function selectFirstProblemWithSolutionRateLimit() {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/api/problems")) {
+      return jsonResponse(problems);
+    }
+    if (url.endsWith("/api/problems/1")) {
+      return jsonResponse(problemDetail);
+    }
+    return jsonResponse({ detail: "Too many requests" }, 429);
   });
   await selectFirstProblem();
 }

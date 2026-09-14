@@ -69,12 +69,21 @@ export function getProblem(problemId: number, signal?: AbortSignal): Promise<Pro
   );
 }
 
-export function createSolution(problemId: number): Promise<SolutionResponse> {
-  return request<SolutionResponse>("/api/solutions", {
+export function createSolution(
+  problemId: number,
+  signal?: AbortSignal,
+): Promise<SolutionResponse> {
+  const init: RequestInit = {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ problem_id: problemId }),
-  });
+  };
+
+  if (signal !== undefined) {
+    init.signal = signal;
+  }
+
+  return request<SolutionResponse>("/api/solutions", init);
 }

@@ -1,0 +1,100 @@
+import type { ProblemDetail, SolutionResponse } from "../lib/api";
+
+import { MarkdownContent } from "./markdown-content";
+import { SolutionResult } from "./solution-result";
+import { LoadingText } from "./status";
+import { Alert } from "./ui/alert";
+import { Button } from "./ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./ui/card";
+
+interface ProblemDetailPanelProps {
+  problem: ProblemDetail | null;
+  loading: boolean;
+  error: string | null;
+  solution: SolutionResponse | null;
+  solutionLoading: boolean;
+  solutionError: string | null;
+  onSolve: () => void;
+}
+
+export function ProblemDetailPanel({
+  problem,
+  loading,
+  error,
+  solution,
+  solutionLoading,
+  solutionError,
+  onSolve,
+}: ProblemDetailPanelProps) {
+  if (loading) {
+    return (
+      <Card className="min-h-96">
+        <CardContent className="flex min-h-96 items-center justify-center">
+          <LoadingText>正在加载题目详情…</LoadingText>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="min-h-96">
+        <CardContent className="flex min-h-96 items-center">
+          <Alert className="w-full">{error}</Alert>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!problem) {
+    return (
+      <Card className="min-h-96">
+        <CardContent className="flex min-h-96 flex-col items-center justify-center text-center">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-400/10 text-2xl text-cyan-300">
+            →
+          </div>
+          <h2 className="text-lg font-semibold text-white">选择一道题目开始</h2>
+          <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
+            从左侧列表选一道题，查看完整题面
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <Card>
+        <CardHeader className="border-b border-slate-800/80">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                Problem
+              </p>
+              <CardTitle className="text-2xl">{problem.title}</CardTitle>
+              <CardDescription className="mt-2">/{problem.slug}</CardDescription>
+            </div>
+            <Button type="button" onClick={onSolve} disabled={solutionLoading}>
+              {solutionLoading ? "正在生成解题结果…" : "让 Agent 解题"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6">
+          <MarkdownContent content={problem.description} />
+        </CardContent>
+      </Card>
+
+      <SolutionResult
+        solution={solution}
+        loading={solutionLoading}
+        error={solutionError}
+      />
+    </div>
+  );
+}

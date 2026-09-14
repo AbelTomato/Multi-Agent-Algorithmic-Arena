@@ -46,6 +46,35 @@ async def test_openai_compatible_provider_posts_chat_completion_request() -> Non
 
 
 @pytest.mark.asyncio
+async def test_openai_compatible_provider_disables_environment_proxies(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    original_async_client = httpx.AsyncClient
+
+    def recording_async_client(*args, **kwargs):
+        captured["trust_env"] = kwargs["trust_env"]
+        return original_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", recording_async_client)
+
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        base_url="https://llm.example.test/v1",
+        model="test-model",
+        timeout_seconds=7.5,
+        max_tokens=512,
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "answer"}}]},
+            )
+        ),
+    )
+
+    assert await provider.complete("solve this problem") == "answer"
+    assert captured == {"trust_env": False}
+
+
+@pytest.mark.asyncio
 async def test_openai_compatible_provider_hides_upstream_error_details() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, text="upstream secret response")
@@ -67,6 +96,51 @@ async def test_openai_compatible_provider_hides_upstream_error_details() -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [429, 500])
+async def test_openai_compatible_provider_hides_error_details_for_upstream_failures(
+    status_code: int,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code, text="upstream secret response")
+
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        base_url="https://llm.example.test/v1",
+        model="test-model",
+        timeout_seconds=7.5,
+        max_tokens=512,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(RuntimeError, match=f"status {status_code}") as error:
+        await provider.complete("solve this problem")
+
+    assert "upstream secret response" not in str(error.value)
+    assert "test-key" not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_provider_hides_transport_error_details() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("upstream timeout with secret details")
+
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        base_url="https://llm.example.test/v1",
+        model="test-model",
+        timeout_seconds=7.5,
+        max_tokens=512,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(RuntimeError, match="OpenAI Compatible request failed") as error:
+        await provider.complete("solve this problem")
+
+    assert "upstream timeout with secret details" not in str(error.value)
+    assert "test-key" not in str(error.value)
+
+
+@pytest.mark.asyncio
 async def test_openai_compatible_provider_rejects_invalid_response_format() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"choices": []})
@@ -81,6 +155,38 @@ async def test_openai_compatible_provider_rejects_invalid_response_format() -> N
     )
 
     with pytest.raises(RuntimeError, match="invalid format"):
+        await provider.complete("solve this problem")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "expected_error"),
+    [
+        (httpx.Response(200, text="not-json"), "invalid format"),
+        (
+            httpx.Response(200, json={"choices": [{"message": {"content": ""}}]}),
+            "empty content",
+        ),
+        (
+            httpx.Response(200, json={"choices": [{"message": {"content": "   "}}]}),
+            "empty content",
+        ),
+    ],
+)
+async def test_openai_compatible_provider_rejects_invalid_or_empty_content(
+    response: httpx.Response,
+    expected_error: str,
+) -> None:
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        base_url="https://llm.example.test/v1",
+        model="test-model",
+        timeout_seconds=7.5,
+        max_tokens=512,
+        transport=httpx.MockTransport(lambda _request: response),
+    )
+
+    with pytest.raises(RuntimeError, match=expected_error):
         await provider.complete("solve this problem")
 
 

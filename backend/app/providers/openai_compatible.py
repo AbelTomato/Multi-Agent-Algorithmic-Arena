@@ -39,6 +39,7 @@ class OpenAICompatibleProvider:
                 headers=headers,
                 timeout=self.timeout_seconds,
                 transport=self.transport,
+                trust_env=False,
             ) as client:
                 response = await client.post("/chat/completions", json=payload)
         except httpx.HTTPError as error:
