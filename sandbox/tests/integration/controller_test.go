@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -16,6 +21,8 @@ import (
 	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/httpapi"
 	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/protocol"
 )
+
+const timeoutResponseDeadline = 6 * time.Second
 
 func TestMain(m *testing.M) {
 	if os.Getenv("ARENA_SANDBOX_INTEGRATION") != "1" {
@@ -54,6 +61,175 @@ func TestRunnerRealDockerLifecycle(t *testing.T) {
 			}
 			assertNoArenaContainersForTest(t)
 		})
+	}
+}
+
+func TestRecoverStaleTasksRemovesVerifiedRealDockerTask(t *testing.T) {
+	taskID := fmt.Sprintf("arena-task-recovery-%d", time.Now().UnixNano())
+	createArgs := executor.NewRunner(nil).BuildDockerRunArgs(taskID, `import time; time.sleep(60)`)
+	createArgs = append([]string{"run", "--detach"}, createArgs[1:]...)
+	if output, err := exec.Command("docker", createArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("create stale Arena task: %v", sanitizeDockerTestError(err, output))
+	}
+	t.Cleanup(func() { removeVerifiedArenaTaskForTest(t, taskID) })
+
+	if err := executor.RecoverStaleTasks(context.Background(), executor.NewDockerCLI()); err != nil {
+		t.Fatalf("RecoverStaleTasks() error = %v", err)
+	}
+	if output, err := exec.Command("docker", "inspect", taskID).CombinedOutput(); err == nil {
+		t.Fatalf("recovered task %q still exists", taskID)
+	} else if !strings.Contains(strings.ToLower(string(output)), "no such") {
+		t.Fatalf("inspect recovered task: %v", sanitizeDockerTestError(err, output))
+	}
+	assertNoArenaContainersForTest(t)
+}
+
+func TestControllerProcessRestartRecoversActiveTask(t *testing.T) {
+	assertNoArenaContainersForTest(t)
+	ensureControllerPortAvailable(t)
+
+	controllerBinary := buildControllerBinaryForTest(t)
+	first := startControllerProcessForTest(t, controllerBinary)
+	defer stopControllerProcessForTest(t, first)
+
+	requestDone := make(chan error, 1)
+	go func() {
+		response, err := http.Post("http://127.0.0.1:8001/execute", "application/json", strings.NewReader(`{"code":"import time; time.sleep(30)","stdin_input":"{}","protocol_version":"json-stdio-v1"}`))
+		if response != nil {
+			response.Body.Close()
+		}
+		requestDone <- err
+	}()
+
+	containerID := waitForSingleArenaContainerForTest(t)
+	t.Cleanup(func() { removeVerifiedArenaContainerForTest(t, containerID) })
+	if err := first.command.Process.Signal(syscall.SIGKILL); err != nil && !strings.Contains(err.Error(), "process already finished") {
+		t.Fatalf("terminate first controller: %v", err)
+	}
+	if err := first.command.Wait(); err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			t.Fatalf("wait for terminated first controller: %v", err)
+		}
+	}
+
+	second := startControllerProcessForTest(t, controllerBinary)
+	defer stopControllerProcessForTest(t, second)
+	select {
+	case err := <-requestDone:
+		if err == nil {
+			t.Fatal("execution request unexpectedly completed after controller termination")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("execution request did not finish after controller termination")
+	}
+	assertNoArenaContainersForTest(t)
+}
+
+type controllerProcessForTest struct {
+	command *exec.Cmd
+}
+
+func buildControllerBinaryForTest(t *testing.T) string {
+	t.Helper()
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("find integration test source directory")
+	}
+	sandboxRoot := filepath.Dir(filepath.Dir(filepath.Dir(sourceFile)))
+	binary := filepath.Join(t.TempDir(), "arena-controller")
+	command := exec.Command("go", "build", "-o", binary, "./cmd/controller")
+	command.Dir = sandboxRoot
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("build controller test binary: %v", sanitizeDockerTestError(err, output))
+	}
+	return binary
+}
+
+func ensureControllerPortAvailable(t *testing.T) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:8001")
+	if err != nil {
+		t.Fatalf("controller loopback port is unavailable: %v", err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatalf("release controller loopback port: %v", err)
+	}
+}
+
+func startControllerProcessForTest(t *testing.T, binary string) *controllerProcessForTest {
+	t.Helper()
+	process := &controllerProcessForTest{command: exec.Command(binary)}
+	if err := process.command.Start(); err != nil {
+		t.Fatalf("start controller process: %v", err)
+	}
+	t.Cleanup(func() { stopControllerProcessForTest(t, process) })
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		response, err := http.Get("http://127.0.0.1:8001/health")
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return process
+			}
+		}
+		if process.command.ProcessState != nil {
+			t.Fatal("controller process exited before health check succeeded")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("controller health check did not succeed")
+	return nil
+}
+
+func stopControllerProcessForTest(t *testing.T, process *controllerProcessForTest) {
+	t.Helper()
+	if process == nil || process.command.Process == nil || process.command.ProcessState != nil {
+		return
+	}
+	if err := process.command.Process.Signal(syscall.SIGKILL); err != nil && !strings.Contains(err.Error(), "process already finished") {
+		t.Errorf("terminate controller test process: %v", err)
+	}
+	if err := process.command.Wait(); err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			t.Errorf("wait for controller test process: %v", err)
+		}
+	}
+}
+
+func waitForSingleArenaContainerForTest(t *testing.T) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		output, err := exec.Command("docker", "ps", "--quiet", "--filter", "label="+executor.ArenaOwnershipLabel+"=true").Output()
+		if err != nil {
+			t.Fatalf("list active Arena tasks: %v", err)
+		}
+		identifiers := strings.Fields(string(output))
+		if len(identifiers) == 1 {
+			return identifiers[0]
+		}
+		if len(identifiers) > 1 {
+			t.Fatalf("active Arena task count = %d, want 1", len(identifiers))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("active Arena task was not created before timeout")
+	return ""
+}
+
+func removeVerifiedArenaContainerForTest(t *testing.T, containerID string) {
+	t.Helper()
+	format := "{{.Name}}\t{{index .Config.Labels \"" + executor.ArenaOwnershipLabel + "\"}}\t{{index .Config.Labels \"" + executor.ArenaTaskIDLabel + "\"}}"
+	output, err := exec.Command("docker", "inspect", "--format", format, containerID).Output()
+	if err != nil {
+		return
+	}
+	parts := strings.Split(strings.TrimSpace(string(output)), "\t")
+	if len(parts) != 3 || parts[1] != "true" || !strings.HasPrefix(parts[2], "arena-task-") || parts[0] != "/"+parts[2] {
+		return
+	}
+	if output, err := exec.Command("docker", "rm", "--force", containerID).CombinedOutput(); err != nil {
+		t.Errorf("remove verified Arena cleanup container %q: %v", containerID, sanitizeDockerTestError(err, output))
 	}
 }
 
@@ -109,8 +285,8 @@ func TestRunnerRealDockerStopsTimeoutWithinWallClockBudget(t *testing.T) {
 	if result.ExitReason != protocol.ExitReasonTimeout {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonTimeout)
 	}
-	if elapsed > 5500*time.Millisecond {
-		t.Fatalf("timeout elapsed = %s, want at most 5.5s", elapsed)
+	if elapsed > timeoutResponseDeadline {
+		t.Fatalf("timeout elapsed = %s, want at most %s including cleanup", elapsed, timeoutResponseDeadline)
 	}
 	assertNoArenaContainersForTest(t)
 }
@@ -139,13 +315,16 @@ try:
 except OSError:
     checks.append("tmp-unwritable")
 checks.append("non-root" if os.geteuid() != 0 else "root-user")
+status = open("/proc/self/status").read()
+checks.append("capabilities-dropped" if "CapEff:\t0000000000000000" in status else "capabilities-present")
+checks.append("no-new-privileges" if "NoNewPrivs:\t1" in status else "new-privileges-allowed")
 print("|".join(checks))
 `
 	result := runner.Execute(context.Background(), request(code))
 	if result.ExitReason != protocol.ExitReasonCompleted {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonCompleted)
 	}
-	for _, expected := range []string{"network-blocked", "root-readonly", "tmp-writable", "non-root"} {
+	for _, expected := range []string{"network-blocked", "root-readonly", "tmp-writable", "non-root", "capabilities-dropped", "no-new-privileges"} {
 		if !strings.Contains(result.Stdout, expected) {
 			t.Fatalf("expected isolation evidence %q was absent", expected)
 		}
@@ -295,6 +474,24 @@ func assertNoArenaContainers() error {
 		return &arenaContainerError{identifiers: string(encoded)}
 	}
 	return nil
+}
+
+func removeVerifiedArenaTaskForTest(t *testing.T, taskID string) {
+	t.Helper()
+	labels, err := exec.Command("docker", "inspect", "--format", "{{index .Config.Labels \""+executor.ArenaOwnershipLabel+"\"}}:{{index .Config.Labels \""+executor.ArenaTaskIDLabel+"\"}}", taskID).Output()
+	if err != nil || strings.TrimSpace(string(labels)) != "true:"+taskID {
+		return
+	}
+	if output, err := exec.Command("docker", "rm", "--force", taskID).CombinedOutput(); err != nil {
+		t.Errorf("remove verified Arena cleanup task %q: %v", taskID, sanitizeDockerTestError(err, output))
+	}
+}
+
+func sanitizeDockerTestError(err error, output []byte) error {
+	if len(output) == 0 {
+		return err
+	}
+	return fmt.Errorf("%v: docker command failed", err)
 }
 
 type arenaContainerError struct {

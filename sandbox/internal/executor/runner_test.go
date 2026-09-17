@@ -2,6 +2,8 @@ package executor
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/protocol"
@@ -10,6 +12,15 @@ import (
 type fakeDocker struct{}
 
 func (fakeDocker) Run(context.Context, []string, []byte, *OutputCollector) (int, InspectResult, error) {
+	return 0, InspectResult{}, nil
+}
+
+type countingDocker struct {
+	calls int
+}
+
+func (docker *countingDocker) Run(context.Context, []string, []byte, *OutputCollector) (int, InspectResult, error) {
+	docker.calls++
 	return 0, InspectResult{}, nil
 }
 
@@ -31,6 +42,24 @@ func TestBuildDockerRunArgsUsesFixedLimitsAndServerTaskID(t *testing.T) {
 		if args[index] != want[index] {
 			t.Fatalf("args[%d] = %q, want %q", index, args[index], want[index])
 		}
+	}
+}
+
+func TestNewTaskIDGeneratesUnique128BitTaskIDsForBoundedSample(t *testing.T) {
+	const samples = 4096
+	seen := make(map[string]struct{}, samples)
+	for range samples {
+		taskID, err := newTaskID()
+		if err != nil {
+			t.Fatalf("newTaskID() error = %v", err)
+		}
+		if !strings.HasPrefix(taskID, "arena-task-") || len(taskID) != len("arena-task-")+32 {
+			t.Fatalf("task ID = %q, want arena-task- followed by 32 hexadecimal characters", taskID)
+		}
+		if _, exists := seen[taskID]; exists {
+			t.Fatalf("duplicate task ID in bounded sample: %q", taskID)
+		}
+		seen[taskID] = struct{}{}
 	}
 }
 
@@ -81,5 +110,21 @@ func TestRunnerReturnsCancelledForCancelledContext(t *testing.T) {
 	result := runner.Execute(context, protocol.ExecuteRequest{Code: "print(1)", StdinInput: "{}", ProtocolVersion: protocol.JSONStdioV1})
 	if result.ExitReason != protocol.ExitReasonCancelled {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonCancelled)
+	}
+}
+
+func TestRunnerRejectsExecutionWhenTaskIDGenerationFails(t *testing.T) {
+	docker := &countingDocker{}
+	runner := NewRunner(docker)
+	runner.taskIDGenerator = func() (string, error) {
+		return "", errors.New("random source unavailable")
+	}
+
+	result := runner.Execute(context.Background(), protocol.ExecuteRequest{Code: "print(1)", StdinInput: "{}", ProtocolVersion: protocol.JSONStdioV1})
+	if result.ExitReason != protocol.ExitReasonUnknownError {
+		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonUnknownError)
+	}
+	if docker.calls != 0 {
+		t.Fatalf("Docker Run() calls = %d, want 0", docker.calls)
 	}
 }

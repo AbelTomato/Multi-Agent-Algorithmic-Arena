@@ -25,11 +25,12 @@ type Docker interface {
 }
 
 type Runner struct {
-	docker Docker
+	docker          Docker
+	taskIDGenerator func() (string, error)
 }
 
 func NewRunner(docker Docker) *Runner {
-	return &Runner{docker: docker}
+	return &Runner{docker: docker, taskIDGenerator: newTaskID}
 }
 
 func (runner *Runner) Execute(parent context.Context, request protocol.ExecuteRequest) protocol.ExecuteResult {
@@ -44,7 +45,11 @@ func (runner *Runner) Execute(parent context.Context, request protocol.ExecuteRe
 	executionContext, cancel := context.WithTimeout(parent, wallTimeout)
 	defer cancel()
 	collector := NewOutputCollector(protocol.MaxOutputBytes)
-	exitCode, inspect, err := runner.docker.Run(executionContext, runner.BuildDockerRunArgs(newTaskID(), request.Code), []byte(request.StdinInput), collector)
+	taskID, err := runner.taskIDGenerator()
+	if err != nil {
+		return runner.result(protocol.ExitReasonUnknownError, nil, collector, started)
+	}
+	exitCode, inspect, err := runner.docker.Run(executionContext, runner.BuildDockerRunArgs(taskID, request.Code), []byte(request.StdinInput), collector)
 	if collector.Exceeded() {
 		return runner.result(protocol.ExitReasonOutputLimitExceeded, protocol.Int(exitCode), collector, started)
 	}
@@ -98,10 +103,10 @@ func (runner *Runner) BuildDockerRunArgs(taskID string, code string) []string {
 	}
 }
 
-func newTaskID() string {
+func newTaskID() (string, error) {
 	buffer := make([]byte, 16)
 	if _, err := rand.Read(buffer); err != nil {
-		return "arena-task-fallback"
+		return "", err
 	}
-	return "arena-task-" + hex.EncodeToString(buffer)
+	return "arena-task-" + hex.EncodeToString(buffer), nil
 }

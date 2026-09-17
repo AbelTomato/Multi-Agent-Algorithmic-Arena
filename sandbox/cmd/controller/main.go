@@ -14,7 +14,11 @@ import (
 )
 
 func main() {
-	controller := httpapi.NewServer(executor.NewRunner(executor.NewDockerCLI()))
+	docker := executor.NewDockerCLI()
+	if err := executor.RecoverStaleTasks(context.Background(), docker); err != nil {
+		log.Fatalf("recover stale Arena tasks before startup: %v", err)
+	}
+	controller := httpapi.NewServer(executor.NewRunner(docker))
 	httpServer := &http.Server{Addr: "127.0.0.1:8001", Handler: controller.Handler()}
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

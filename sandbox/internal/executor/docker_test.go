@@ -41,6 +41,51 @@ func TestDockerCLICleansVerifiedTaskAfterSuccessfulExecution(t *testing.T) {
 	}
 }
 
+func TestDockerCLIRecoversListedOwnedTask(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "docker-cli-recovery.log")
+	t.Setenv("ARENA_DOCKER_HELPER", "1")
+	t.Setenv("ARENA_DOCKER_HELPER_LOG", logPath)
+	docker := newDockerCLIForCommand(testDockerCommand)
+
+	if err := RecoverStaleTasks(context.Background(), docker); err != nil {
+		t.Fatalf("RecoverStaleTasks() error = %v", err)
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	got := strings.Fields(string(content))
+	want := []string{"ps", "inspect-recovery", "stop", "rm"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("CLI calls = %v, want %v", got, want)
+	}
+}
+
+func TestDockerCLIListsManagedTasksWithFullContainerIdentifiers(t *testing.T) {
+	var arguments []string
+	docker := newDockerCLIForCommand(func(ctx context.Context, args ...string) *exec.Cmd {
+		arguments = append([]string(nil), args...)
+		return testDockerCommand(ctx, args...)
+	})
+
+	if _, err := docker.ListManagedTasks(context.Background()); err != nil {
+		t.Fatalf("ListManagedTasks() error = %v", err)
+	}
+	if !containsArgument(arguments, "--no-trunc") {
+		t.Fatalf("ListManagedTasks() arguments = %#v, want --no-trunc", arguments)
+	}
+}
+
+func containsArgument(arguments []string, expected string) bool {
+	for _, argument := range arguments {
+		if argument == expected {
+			return true
+		}
+	}
+	return false
+}
+
 func testDockerCommand(ctx context.Context, args ...string) *exec.Cmd {
 	commandArgs := append([]string{"-test.run=TestDockerCLIHelperProcess", "--"}, args...)
 	return exec.CommandContext(ctx, os.Args[0], commandArgs...)
@@ -66,10 +111,14 @@ func TestDockerCLIHelperProcess(t *testing.T) {
 	switch command {
 	case "run":
 		_, _ = io.WriteString(os.Stdout, "ok")
+	case "ps":
+		_, _ = io.WriteString(os.Stdout, "container-unit\n")
 	case "inspect":
 		format := strings.Join(args[separator:], " ")
 		if strings.Contains(format, ".State") {
 			_, _ = io.WriteString(os.Stdout, `{"OOMKilled":false}`)
+		} else if strings.Contains(format, ".Id") {
+			_, _ = io.WriteString(os.Stdout, "container-unit\t/arena-task-container-unit\ttrue\tarena-task-container-unit")
 		} else {
 			_, _ = io.WriteString(os.Stdout, "true:arena-task-unit")
 		}
@@ -89,6 +138,8 @@ func logCommand(command string) {
 		format := strings.Join(os.Args, " ")
 		if strings.Contains(format, ".State") {
 			command = "inspect-state"
+		} else if strings.Contains(format, ".Id") {
+			command = "inspect-recovery"
 		} else {
 			command = "inspect-labels"
 		}
