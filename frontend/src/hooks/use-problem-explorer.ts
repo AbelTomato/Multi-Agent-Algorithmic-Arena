@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   createSolution,
+  createEvaluation,
+  type EvaluationResponse,
   getProblem,
   getProblems,
   type ProblemDetail,
@@ -23,6 +25,10 @@ export interface ProblemExplorerState {
   solutionLoading: boolean;
   solutionError: string | null;
   solveProblem: () => void;
+  evaluation: EvaluationResponse | null;
+  evaluationLoading: boolean;
+  evaluationError: string | null;
+  evaluateProblem: () => void;
 }
 
 export function useProblemExplorer(): ProblemExplorerState {
@@ -36,8 +42,13 @@ export function useProblemExplorer(): ProblemExplorerState {
   const [solution, setSolution] = useState<SolutionResponse | null>(null);
   const [solutionLoading, setSolutionLoading] = useState(false);
   const [solutionError, setSolutionError] = useState<string | null>(null);
+  const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
+  const [evaluationLoading, setEvaluationLoading] = useState(false);
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const solutionControllerRef = useRef<AbortController | null>(null);
   const solutionRequestIdRef = useRef(0);
+  const evaluationControllerRef = useRef<AbortController | null>(null);
+  const evaluationRequestIdRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -98,6 +109,8 @@ export function useProblemExplorer(): ProblemExplorerState {
     return () => {
       solutionControllerRef.current?.abort();
       solutionRequestIdRef.current += 1;
+      evaluationControllerRef.current?.abort();
+      evaluationRequestIdRef.current += 1;
     };
   }, []);
 
@@ -110,6 +123,9 @@ export function useProblemExplorer(): ProblemExplorerState {
       solutionControllerRef.current?.abort();
       solutionControllerRef.current = null;
       solutionRequestIdRef.current += 1;
+      evaluationControllerRef.current?.abort();
+      evaluationControllerRef.current = null;
+      evaluationRequestIdRef.current += 1;
       setSelectedProblemId(problemId);
       setProblem(null);
       setProblemLoading(true);
@@ -117,6 +133,9 @@ export function useProblemExplorer(): ProblemExplorerState {
       setSolution(null);
       setSolutionLoading(false);
       setSolutionError(null);
+      setEvaluation(null);
+      setEvaluationLoading(false);
+      setEvaluationError(null);
     },
     [selectedProblemId],
   );
@@ -157,6 +176,42 @@ export function useProblemExplorer(): ProblemExplorerState {
       });
   }, [problem, solutionLoading]);
 
+  const evaluateProblem = useCallback(() => {
+    if (!problem || evaluationLoading) {
+      return;
+    }
+
+    evaluationControllerRef.current?.abort();
+    const controller = new AbortController();
+    const requestId = evaluationRequestIdRef.current + 1;
+    evaluationRequestIdRef.current = requestId;
+    evaluationControllerRef.current = controller;
+    setEvaluation(null);
+    setEvaluationError(null);
+    setEvaluationLoading(true);
+
+    const isCurrentRequest = () =>
+      requestId === evaluationRequestIdRef.current && !controller.signal.aborted;
+
+    void createEvaluation(problem.id, controller.signal)
+      .then((result) => {
+        if (isCurrentRequest()) {
+          setEvaluation(result);
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCurrentRequest()) {
+          setEvaluationError(getErrorMessage(error, "evaluation"));
+        }
+      })
+      .finally(() => {
+        if (isCurrentRequest()) {
+          setEvaluationLoading(false);
+          evaluationControllerRef.current = null;
+        }
+      });
+  }, [evaluationLoading, problem]);
+
   return {
     problems,
     problemsLoading,
@@ -170,5 +225,9 @@ export function useProblemExplorer(): ProblemExplorerState {
     solutionLoading,
     solutionError,
     solveProblem,
+    evaluation,
+    evaluationLoading,
+    evaluationError,
+    evaluateProblem,
   };
 }

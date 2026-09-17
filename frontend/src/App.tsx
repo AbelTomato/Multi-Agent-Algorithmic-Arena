@@ -16,6 +16,10 @@ export default function App() {
     solutionLoading,
     solutionError,
     solveProblem,
+    evaluation,
+    evaluationLoading,
+    evaluationError,
+    evaluateProblem,
   } = useProblemExplorer();
 
   return (
@@ -67,6 +71,10 @@ export default function App() {
             solutionLoading={solutionLoading}
             solutionError={solutionError}
             onSolve={solveProblem}
+            evaluation={evaluation}
+            evaluationLoading={evaluationLoading}
+            evaluationError={evaluationError}
+            onEvaluate={evaluateProblem}
           />
         </div>
       </main>

@@ -14,6 +14,21 @@ export interface SolutionResponse {
   language: string;
 }
 
+export type EvaluationStatus = "AC" | "WA" | "RE" | "TLE" | "MLE" | "OLE" | "UKE";
+
+export interface EvaluationResponse {
+  problem_id: number;
+  problem_slug: string;
+  language: "python";
+  status: EvaluationStatus;
+  case_version: string;
+  case_count: number;
+  executed_count: number;
+  passed_count: number;
+  failed_case_index: number | null;
+  summary: string;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -86,4 +101,23 @@ export function createSolution(
   }
 
   return request<SolutionResponse>("/api/solutions", init);
+}
+
+export function createEvaluation(
+  problemId: number,
+  signal?: AbortSignal,
+): Promise<EvaluationResponse> {
+  const init: RequestInit = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ problem_id: problemId }),
+  };
+
+  if (signal !== undefined) {
+    init.signal = signal;
+  }
+
+  return request<EvaluationResponse>("/api/evaluations", init);
 }

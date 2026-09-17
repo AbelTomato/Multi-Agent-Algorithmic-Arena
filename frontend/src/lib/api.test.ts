@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, createSolution, getProblem, getProblems } from "./api";
+import { ApiError, createEvaluation, createSolution, getProblem, getProblems } from "./api";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -53,6 +53,37 @@ describe("api client", () => {
     expect(String(request?.body)).not.toContain("prompt");
     expect(String(request?.body)).not.toContain("model");
     expect(String(request?.body)).not.toContain("provider");
+  });
+
+  it("sends only the problem id when creating an evaluation", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        problem_id: 7,
+        problem_slug: "two-sum",
+        language: "python",
+        status: "AC",
+        case_version: "v1",
+        case_count: 9,
+        executed_count: 9,
+        passed_count: 9,
+        failed_case_index: null,
+        summary: "通过当前版本评测用例",
+      }),
+    );
+
+    await expect(createEvaluation(7)).resolves.toMatchObject({
+      problem_id: 7,
+      status: "AC",
+    });
+
+    const [, request] = fetchMock.mock.calls[0];
+    expect(request).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ problem_id: 7 }),
+    });
+    expect(String(request?.body)).not.toContain("code");
+    expect(String(request?.body)).not.toContain("prompt");
   });
 
   it("converts network and HTTP failures to ApiError", async () => {

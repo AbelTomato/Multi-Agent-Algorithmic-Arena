@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_timeout_seconds: float = Field(default=30.0, gt=0)
     llm_max_tokens: int = Field(default=4096, gt=0)
+    evaluation_enabled: bool = False
+    evaluation_total_timeout_seconds: float = Field(default=210.0, gt=0)
+    sandbox_controller_url: str = "http://127.0.0.1:8001"
+    sandbox_controller_timeout_seconds: float = Field(default=10.0, gt=0)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

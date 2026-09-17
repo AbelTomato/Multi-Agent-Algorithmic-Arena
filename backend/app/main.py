@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.database import dispose_engine
 
 from app.api.problems import router as problem_router
+from app.api.evaluations import router as evaluation_router
 from app.api.solutions import router as solution_router
 
 
@@ -33,6 +34,7 @@ app.add_middleware(
 )
 app.include_router(problem_router)
 app.include_router(solution_router)
+app.include_router(evaluation_router)
 
 @app.get("/")
 async def root() -> dict[str, str]:

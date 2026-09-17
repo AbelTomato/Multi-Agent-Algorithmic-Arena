@@ -40,6 +40,20 @@ function mockSuccessfulApi(solutionResponse?: unknown) {
         },
       );
     }
+    if (url.endsWith("/api/evaluations")) {
+      return jsonResponse({
+        problem_id: 1,
+        problem_slug: "two-sum",
+        language: "python",
+        status: "AC",
+        case_version: "v1",
+        case_count: 9,
+        executed_count: 9,
+        passed_count: 9,
+        failed_case_index: null,
+        summary: "通过当前版本评测用例",
+      });
+    }
     throw new Error(`Unexpected request: ${url} ${init?.method ?? "GET"}`);
   });
 }
@@ -186,6 +200,62 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "解题思路" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows the evaluation summary and aborts an obsolete evaluation after switching problems", async () => {
+    let resolveEvaluation: ((response: Response) => void) | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/problems")) return jsonResponse(problems);
+      if (url.endsWith("/api/problems/1")) return jsonResponse(problemDetail);
+      if (url.endsWith("/api/problems/2")) {
+        return jsonResponse({
+          id: 2,
+          slug: "valid-parentheses",
+          title: "Valid Parentheses",
+          description: "# Valid Parentheses",
+        });
+      }
+      if (url.endsWith("/api/evaluations")) {
+        return new Promise<Response>((resolve) => {
+          resolveEvaluation = resolve;
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Two Sum/ }));
+    await screen.findByRole("heading", { name: "Two Sum", level: 2 });
+    fireEvent.click(screen.getByRole("button", { name: "评测 Agent 代码" }));
+
+    const evaluationRequest = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith("/api/evaluations"),
+    );
+    expect(evaluationRequest?.[1]).toMatchObject({ signal: expect.any(AbortSignal) });
+
+    fireEvent.click(screen.getByRole("button", { name: /Valid Parentheses/ }));
+    await screen.findByRole("heading", { name: "Valid Parentheses", level: 2 });
+    expect((evaluationRequest?.[1] as RequestInit).signal).toHaveProperty("aborted", true);
+
+    resolveEvaluation?.(
+      jsonResponse({
+        problem_id: 1,
+        problem_slug: "two-sum",
+        language: "python",
+        status: "AC",
+        case_version: "v1",
+        case_count: 9,
+        executed_count: 9,
+        passed_count: 9,
+        failed_case_index: null,
+        summary: "通过当前版本评测用例",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("通过当前版本评测用例")).not.toBeInTheDocument();
     });
   });
 });

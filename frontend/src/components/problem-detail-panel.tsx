@@ -1,7 +1,8 @@
-import type { ProblemDetail, SolutionResponse } from "../lib/api";
+import type { EvaluationResponse, ProblemDetail, SolutionResponse } from "../lib/api";
 
 import { MarkdownContent } from "./markdown-content";
 import { SolutionResult } from "./solution-result";
+import { EvaluationResult } from "./evaluation-result";
 import { LoadingText } from "./status";
 import { Alert } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -21,6 +22,10 @@ interface ProblemDetailPanelProps {
   solutionLoading: boolean;
   solutionError: string | null;
   onSolve: () => void;
+  evaluation: EvaluationResponse | null;
+  evaluationLoading: boolean;
+  evaluationError: string | null;
+  onEvaluate: () => void;
 }
 
 export function ProblemDetailPanel({
@@ -31,6 +36,10 @@ export function ProblemDetailPanel({
   solutionLoading,
   solutionError,
   onSolve,
+  evaluation,
+  evaluationLoading,
+  evaluationError,
+  onEvaluate,
 }: ProblemDetailPanelProps) {
   if (loading) {
     return (
@@ -80,9 +89,14 @@ export function ProblemDetailPanel({
               <CardTitle className="text-2xl">{problem.title}</CardTitle>
               <CardDescription className="mt-2">/{problem.slug}</CardDescription>
             </div>
-            <Button type="button" onClick={onSolve} disabled={solutionLoading}>
-              {solutionLoading ? "正在生成解题结果…" : "让 Agent 解题"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" onClick={onSolve} disabled={solutionLoading}>
+                {solutionLoading ? "正在生成解题结果…" : "让 Agent 解题"}
+              </Button>
+              <Button type="button" onClick={onEvaluate} disabled={evaluationLoading}>
+                {evaluationLoading ? "正在评测…" : "评测 Agent 代码"}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="pt-6">
@@ -94,6 +108,11 @@ export function ProblemDetailPanel({
         solution={solution}
         loading={solutionLoading}
         error={solutionError}
+      />
+      <EvaluationResult
+        evaluation={evaluation}
+        loading={evaluationLoading}
+        error={evaluationError}
       />
     </div>
   );

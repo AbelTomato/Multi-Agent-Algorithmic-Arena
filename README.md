@@ -2,19 +2,20 @@
 
 ## 项目简介
 
-Multi-Agent-Algorithmic-Arena 当前是一个单 Agent 算法题解答 MVP：用户浏览 PostgreSQL 中的题目，选择题目后由后端调用 Agent 生成 Markdown 格式的解题结果，前端负责展示题目和结果。
+Multi-Agent-Algorithmic-Arena 当前是一个单 Agent 算法题解答 MVP，并提供一个默认关闭的本地候选程序评测闭环：用户浏览 PostgreSQL 中的题目，可请求 Markdown 解法，或在显式启用本地评测后生成 Python 候选程序并获取 Judge 摘要。
 
 当前 MVP 包含：
 
 - 题目列表和题目详情；
 - 同步 `POST /api/solutions` 解题接口；
+- 默认关闭的 `POST /api/evaluations` 本地评测接口：固定 Python 3.11、版本化用例、可信 Judge 与 Go 执行控制器；
 - 服务端统一 Prompt、Agent 重试和受控错误返回；
 - 默认 `MockAgent`，以及可选的 OpenAI Compatible Provider；
 - React 前端、FastAPI 后端、PostgreSQL 数据库；
 - Docker Compose、Nginx、ECS 公网 IP 灰度部署；
 - ECS 监控、QQ 邮箱故障告警和 PostgreSQL 自动备份。
 
-当前不包含代码执行、正确性评测、评分、比赛状态机、多 Agent 协作、Redis、WebSocket、流式输出、登录和历史记录。
+当前不包含评分、比赛状态机、多 Agent 协作、Redis、WebSocket、流式输出、登录和历史记录。评测不支持真实 Provider 验收、ECS 部署或公网匿名代码执行。
 
 ## 技术栈
 
@@ -45,9 +46,15 @@ LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=
 LLM_TIMEOUT_SECONDS=30
 LLM_MAX_TOKENS=4096
+EVALUATION_ENABLED=false
+EVALUATION_TOTAL_TIMEOUT_SECONDS=210
+SANDBOX_CONTROLLER_URL=http://127.0.0.1:8001
+SANDBOX_CONTROLLER_TIMEOUT_SECONDS=10
 ```
 
 启用真实 OpenAI Compatible Provider 时，必须显式设置 `LLM_PROVIDER=openai_compatible`、`LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL`。真实密钥不得提交到 Git、前端、日志或镜像。
+
+本地评测默认关闭。启用 `EVALUATION_ENABLED=true` 前，必须先启动 `/home/abeltomato/workspace/projects/Multi-Agent-Algorithmic-Arena/sandbox` 中仅绑定 `127.0.0.1:8001` 的 Go 控制器，并明确授权其创建和删除带 Arena 标签的临时容器。控制器不可用时 API 会失败关闭，不会降级为宿主机执行。普通 Docker/WSL2 与宿主机共享内核，不是强安全沙箱，不得直接暴露公网。
 
 ### 前端配置
 
@@ -93,6 +100,7 @@ python -m uvicorn app.main:app --reload
 - API 根地址：http://localhost:8000/
 - 健康检查：http://localhost:8000/health
 - 题目列表：http://localhost:8000/api/problems
+- 本地评测：http://localhost:8000/api/evaluations（默认关闭）
 - API 文档：http://localhost:8000/docs
 
 ### 本地前端
@@ -104,7 +112,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-前端默认地址：http://localhost:5173。后端和前端同时启动后，可按“题目列表 → 题目详情 → 请求解题 → 查看 Markdown 结果”的流程验证 MVP。
+前端默认地址：http://localhost:5173。后端和前端同时启动后，可按“题目列表 → 题目详情 → 请求解题 → 查看 Markdown 结果”的流程验证旧 MVP；显式启用本地评测后，可使用“评测 Agent 代码”查看当前版本用例摘要。
 
 ### Docker Compose
 
@@ -133,6 +141,20 @@ docker compose run --rm backend python -m app.seed
 cd backend
 python -m pytest -q
 python -m compileall -q app alembic tests
+```
+
+本地评测的非 Docker 回归：
+
+```bash
+cd backend
+LLM_PROVIDER=mock .venv/bin/python -m pytest -q tests/test_evaluations.py tests/test_agents.py tests/test_solutions.py
+```
+
+真实评测集成测试会创建和删除 Arena 标签临时容器，必须另行授权并启动 Go 控制器：
+
+```bash
+cd backend
+ARENA_SANDBOX_INTEGRATION=1 LLM_PROVIDER=mock .venv/bin/python -m pytest -q tests/integration/test_evaluation_flow.py
 ```
 
 前端：
