@@ -1,0 +1,63 @@
+{
+  "problem_slug": "valid-parentheses",
+  "version": "v1",
+  "protocol_version": "json-stdio-v1",
+  "public_cases": [
+    {
+      "input": {"s": ""},
+      "expected": {"result": true}
+    },
+    {
+      "input": {"s": "()"},
+      "expected": {"result": true}
+    },
+    {
+      "input": {"s": "()[]{}"},
+      "expected": {"result": true}
+    },
+    {
+      "input": {"s": "(]"},
+      "expected": {"result": false}
+    },
+    {
+      "input": {"s": "([)]"},
+      "expected": {"result": false}
+    },
+    {
+      "input": {"s": "{[]}"},
+      "expected": {"result": true}
+    }
+  ],
+  "hidden_cases": [
+    {
+      "input": {"s": "("},
+      "expected": {"result": false},
+      "note": "未闭合左括号"
+    },
+    {
+      "input": {"s": ")"},
+      "expected": {"result": false},
+      "note": "无匹配左括号"
+    },
+    {
+      "input": {"s": "(((())))"},
+      "expected": {"result": true},
+      "note": "多层同类嵌套"
+    },
+    {
+      "input": {"s": "({[]})"},
+      "expected": {"result": true},
+      "note": "多类型正确嵌套"
+    },
+    {
+      "input": {"s": "(()]"},
+      "expected": {"result": false},
+      "note": "局部类型错误"
+    },
+    {
+      "input": {"s": "())"},
+      "expected": {"result": false},
+      "note": "提前闭合"
+    }
+  ]
+}

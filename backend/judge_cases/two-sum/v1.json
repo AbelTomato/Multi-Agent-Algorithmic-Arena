@@ -1,0 +1,54 @@
+{
+  "problem_slug": "two-sum",
+  "version": "v1",
+  "protocol_version": "json-stdio-v1",
+  "public_cases": [
+    {
+      "input": {"nums": [2, 7, 11, 15], "target": 9},
+      "expected": {"indices": [0, 1]},
+      "note": "下标顺序可任意"
+    },
+    {
+      "input": {"nums": [3, 2, 4], "target": 6},
+      "expected": {"indices": [1, 2]},
+      "note": "下标顺序可任意"
+    },
+    {
+      "input": {"nums": [3, 3], "target": 6},
+      "expected": {"indices": [0, 1]},
+      "note": "下标顺序可任意"
+    }
+  ],
+  "hidden_cases": [
+    {
+      "input": {"nums": [-3, 4, 3, 90], "target": 0},
+      "expected": {"indices": [0, 2]},
+      "note": "负数，下标顺序可任意"
+    },
+    {
+      "input": {"nums": [0, 4, 3, 0], "target": 0},
+      "expected": {"indices": [0, 3]},
+      "note": "两个零，下标顺序可任意"
+    },
+    {
+      "input": {"nums": [1, 2, 3, 4, 8], "target": 12},
+      "expected": {"indices": [3, 4]},
+      "note": "答案位于后部，下标顺序可任意"
+    },
+    {
+      "input": {"nums": [1, 5, 1, 10], "target": 2},
+      "expected": {"indices": [0, 2]},
+      "note": "重复值不同下标，下标顺序可任意"
+    },
+    {
+      "input": {"nums": [-1000000000, 1000000000], "target": 0},
+      "expected": {"indices": [0, 1]},
+      "note": "整数边界，下标顺序可任意"
+    },
+    {
+      "input": {"nums": [-5, 8], "target": 3},
+      "expected": {"indices": [0, 1]},
+      "note": "最小数组长度，下标顺序可任意"
+    }
+  ]
+}
