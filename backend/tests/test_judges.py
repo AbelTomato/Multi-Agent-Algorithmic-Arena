@@ -56,7 +56,10 @@ class TestCaseCatalog:
             "problem_slug": "wrong-slug",
             "version": "v1",
             "protocol_version": "json-stdio-v1",
-            "public_cases": [],
+            "public_cases": [{
+                "input": {"s": "()"},
+                "expected": {"result": True}
+            }],
             "hidden_cases": []
         }))
 
@@ -80,7 +83,7 @@ class TestCaseCatalog:
 
         catalog = CaseCatalog(base_dir=tmp_path)
 
-        with pytest.raises(ValueError, match="用例集合为空"):
+        with pytest.raises(ValueError, match="用例集合至少包含一个用例"):
             catalog.load("test-problem", "v1")
 
 
@@ -176,7 +179,8 @@ class TestEvaluatorJudgment:
         status = evaluator._judge_output(
             problem_slug="two-sum",
             stdout='{"indices": [0, 1]}',
-            expected={"indices": [0, 1]}
+            expected={"indices": [0, 1]},
+            case_input={"nums": [2, 7], "target": 9}
         )
         assert status == EvaluationStatus.AC
 
@@ -184,7 +188,8 @@ class TestEvaluatorJudgment:
         status = evaluator._judge_output(
             problem_slug="two-sum",
             stdout='{"indices": [1, 0]}',
-            expected={"indices": [0, 1]}
+            expected={"indices": [0, 1]},
+            case_input={"nums": [2, 7], "target": 9}
         )
         assert status == EvaluationStatus.AC
 
@@ -198,7 +203,8 @@ class TestEvaluatorJudgment:
         status = evaluator._judge_output(
             problem_slug="two-sum",
             stdout='{"indices": [0, 2]}',
-            expected={"indices": [0, 1]}
+            expected={"indices": [0, 1]},
+            case_input={"nums": [2, 7, 11], "target": 9}
         )
         assert status == EvaluationStatus.WA
 
@@ -212,7 +218,8 @@ class TestEvaluatorJudgment:
         status = evaluator._judge_output(
             problem_slug="two-sum",
             stdout='{"indices": [1, 1]}',
-            expected={"indices": [0, 1]}
+            expected={"indices": [0, 1]},
+            case_input={"nums": [2, 7], "target": 9}
         )
         assert status == EvaluationStatus.WA
 
@@ -226,7 +233,8 @@ class TestEvaluatorJudgment:
         status = evaluator._judge_output(
             problem_slug="two-sum",
             stdout='{"indices": [0]}',
-            expected={"indices": [0, 1]}
+            expected={"indices": [0, 1]},
+            case_input={"nums": [2, 7], "target": 9}
         )
         assert status == EvaluationStatus.RE
 

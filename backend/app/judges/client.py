@@ -1,22 +1,44 @@
-"""执行控制器客户端
+"""Go 执行控制器的有界异步 HTTP 客户端。"""
 
-通过 httpx 调用独立的执行控制器服务。
-"""
+from typing import Any
 
 import httpx
-from typing import Optional
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from app.judges.base import EvaluationStatus
-
-
-class ExecutionRequest(dict):
-    """执行请求（简化版，直接继承 dict）"""
-    pass
+from app.judges.base import EvaluationStatus, JSON_STDIO_V1
 
 
-class ExecutionResult(dict):
-    """执行结果（简化版，直接继承 dict）"""
-    pass
+class ControllerError(Exception):
+    """执行控制器基础设施错误的基类。"""
+
+
+class ControllerBusyError(ControllerError):
+    """控制器单槽已被占用。"""
+
+
+class ControllerUnavailableError(ControllerError):
+    """控制器无法连接或返回服务端错误。"""
+
+
+class ControllerTimeoutError(ControllerError):
+    """控制器 HTTP 请求超时。"""
+
+
+class ControllerResponseError(ControllerError):
+    """控制器成功响应不符合冻结契约。"""
+
+
+class ExecutionResult(BaseModel):
+    """冻结的 Go 控制器执行响应。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exit_reason: str
+    exit_code: int | None = None
+    stdout: str
+    stderr: str
+    wall_time_ms: int
+    oom_killed: bool
 
 
 class SandboxClient:
@@ -28,106 +50,57 @@ class SandboxClient:
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:8001",
-        timeout: float = 10.0
-    ):
-        """初始化客户端
-
-        Args:
-            base_url: 执行控制器基础 URL
-            timeout: 单次请求超时（秒），默认 10 秒
-        """
+        timeout: float = 10.0,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
-        self.client = httpx.Client(timeout=timeout)
+        self._owns_client = client is None
+        self.client = client or httpx.AsyncClient(timeout=timeout, trust_env=False)
 
-    def execute(
-        self,
-        code: str,
-        stdin_input: str,
-        task_id: Optional[str] = None
-    ) -> tuple[EvaluationStatus, ExecutionResult]:
-        """执行代码
-
-        Args:
-            code: 完整的可执行 Python 程序
-            stdin_input: 单个用例的 JSON 输入字符串
-            task_id: 任务 ID（可选）
-
-        Returns:
-            (status, result): 评测状态和执行结果
-
-        Raises:
-            httpx.HTTPError: 网络或 HTTP 错误
-        """
+    async def execute(self, *, code: str, stdin_input: str) -> tuple[EvaluationStatus, ExecutionResult]:
         request_data = {
             "code": code,
             "stdin_input": stdin_input,
-            "protocol_version": "json-stdio-v1"
+            "protocol_version": JSON_STDIO_V1,
         }
-
-        if task_id:
-            request_data["task_id"] = task_id
-
         try:
-            response = self.client.post(
-                f"{self.base_url}/execute",
-                json=request_data
-            )
-            response.raise_for_status()
-            result = response.json()
+            response = await self.client.post(f"{self.base_url}/execute", json=request_data)
+        except httpx.TimeoutException as error:
+            raise ControllerTimeoutError("执行控制器请求超时") from error
+        except httpx.HTTPError as error:
+            raise ControllerUnavailableError("无法连接到执行控制器") from error
+        if response.status_code == 409:
+            raise ControllerBusyError("执行控制器忙碌")
+        if response.status_code >= 500:
+            raise ControllerUnavailableError("执行控制器不可用")
+        if response.status_code != 200:
+            raise ControllerResponseError("执行控制器拒绝了内部执行请求")
+        try:
+            result = ExecutionResult.model_validate(response.json())
+        except (ValueError, ValidationError) as error:
+            raise ControllerResponseError("执行控制器响应格式无效") from error
+        return self._classify_execution_result(result), result
 
-            # 根据执行结果判定状态
-            status = self._classify_execution_result(result)
-            return status, result
-
-        except httpx.ConnectError as e:
-            raise httpx.HTTPError(f"无法连接到执行控制器: {e}") from e
-        except httpx.TimeoutException as e:
-            raise httpx.HTTPError(f"执行控制器超时: {e}") from e
-
-    def _classify_execution_result(self, result: ExecutionResult) -> EvaluationStatus:
-        """根据执行结果分类评测状态
-
-        只判断执行层面的状态（TLE/OLE/RE），不判断答案正确性（AC/WA）。
-        """
-        exit_reason = result.get("exit_reason")
-
-        if exit_reason == "timeout":
-            return EvaluationStatus.TLE
-
-        if exit_reason == "output_limit_exceeded":
-            return EvaluationStatus.OLE
-
-        if exit_reason in ("non_zero_exit", "docker_error", "unknown_error"):
+    @staticmethod
+    def _classify_execution_result(result: ExecutionResult) -> EvaluationStatus:
+        if result.exit_reason == "completed" and result.exit_code == 0:
+            return EvaluationStatus.AC
+        if result.exit_reason == "non_zero_exit":
             return EvaluationStatus.RE
+        if result.exit_reason == "timeout":
+            return EvaluationStatus.TLE
+        if result.exit_reason == "output_limit_exceeded":
+            return EvaluationStatus.OLE
+        if result.exit_reason == "memory_limit_exceeded" and result.oom_killed:
+            return EvaluationStatus.MLE
+        return EvaluationStatus.UKE
 
-        if exit_reason == "completed" and result.get("exit_code") == 0:
-            # 正常完成，需要后续判定答案
-            return EvaluationStatus.AC  # 临时标记，由 evaluator 覆盖
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self.client.aclose()
 
-        # 其他情况视为运行时错误
-        return EvaluationStatus.RE
-
-    def health_check(self) -> bool:
-        """健康检查
-
-        Returns:
-            bool: 执行控制器是否可用
-        """
-        try:
-            # 使用独立的短超时客户端进行健康检查
-            with httpx.Client(timeout=3.0) as check_client:
-                response = check_client.get(f"{self.base_url}/health")
-                return response.status_code == 200
-        except Exception:
-            return False
-
-    def close(self):
-        """关闭客户端"""
-        self.client.close()
-
-    def __enter__(self):
+    async def __aenter__(self) -> "SandboxClient":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        await self.aclose()
