@@ -9,3 +9,4 @@ backend/*.db
 __pycache__/
 *.py[cod]
 .clinerules/
+.tools/
