@@ -20,6 +20,11 @@ export default function App() {
     evaluationLoading,
     evaluationError,
     evaluateProblem,
+    evaluationHistory,
+    evaluationHistoryTotal,
+    evaluationHistoryLoading,
+    evaluationHistoryError,
+    loadMoreEvaluationHistory,
   } = useProblemExplorer();
 
   return (
@@ -75,6 +80,11 @@ export default function App() {
             evaluationLoading={evaluationLoading}
             evaluationError={evaluationError}
             onEvaluate={evaluateProblem}
+            evaluationHistory={evaluationHistory}
+            evaluationHistoryTotal={evaluationHistoryTotal}
+            evaluationHistoryLoading={evaluationHistoryLoading}
+            evaluationHistoryError={evaluationHistoryError}
+            onLoadMoreEvaluationHistory={loadMoreEvaluationHistory}
           />
         </div>
       </main>

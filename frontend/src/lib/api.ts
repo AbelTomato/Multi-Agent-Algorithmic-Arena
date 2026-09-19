@@ -27,6 +27,54 @@ export interface EvaluationResponse {
   passed_count: number;
   failed_case_index: number | null;
   summary: string;
+  evaluation_id: string;
+  run_status: EvaluationRunStatus;
+  created_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+}
+
+export type EvaluationRunStatus =
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "TIMED_OUT"
+  | "REJECTED"
+  | "INTERRUPTED";
+
+export type EvaluationErrorCategory =
+  | "AGENT_ERROR"
+  | "CONTROLLER_BUSY"
+  | "CONTROLLER_UNAVAILABLE"
+  | "CONTROLLER_TIMEOUT"
+  | "CONTROLLER_RESPONSE_ERROR"
+  | "EVALUATION_TIMEOUT"
+  | "INTERNAL_ERROR";
+
+export interface EvaluationRunItem {
+  evaluation_id: string;
+  problem_id: number;
+  problem_slug: string;
+  language: "python";
+  run_status: EvaluationRunStatus;
+  judge_status: EvaluationStatus | null;
+  case_version: string;
+  case_count: number;
+  executed_count: number | null;
+  passed_count: number | null;
+  failed_case_index: number | null;
+  summary: string;
+  error_category: EvaluationErrorCategory | null;
+  created_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+}
+
+export interface EvaluationRunListResponse {
+  items: EvaluationRunItem[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export class ApiError extends Error {
@@ -120,4 +168,35 @@ export function createEvaluation(
   }
 
   return request<EvaluationResponse>("/api/evaluations", init);
+}
+
+export function getEvaluationHistory({
+  problemId,
+  limit = 20,
+  offset = 0,
+  signal,
+}: {
+  problemId?: number;
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+} = {}): Promise<EvaluationRunListResponse> {
+  const params = new URLSearchParams();
+  if (problemId !== undefined) params.set("problem_id", String(problemId));
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  return request<EvaluationRunListResponse>(`/api/evaluations?${params.toString()}`, {
+    credentials: "same-origin",
+    ...(signal === undefined ? {} : { signal }),
+  });
+}
+
+export function getEvaluationRun(
+  evaluationId: string,
+  signal?: AbortSignal,
+): Promise<EvaluationRunItem> {
+  return request<EvaluationRunItem>(`/api/evaluations/${encodeURIComponent(evaluationId)}`, {
+    credentials: "same-origin",
+    ...(signal === undefined ? {} : { signal }),
+  });
 }

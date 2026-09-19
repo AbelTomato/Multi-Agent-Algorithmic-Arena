@@ -4,6 +4,8 @@ import {
   createSolution,
   createEvaluation,
   type EvaluationResponse,
+  getEvaluationHistory,
+  type EvaluationRunItem,
   getProblem,
   getProblems,
   type ProblemDetail,
@@ -29,6 +31,11 @@ export interface ProblemExplorerState {
   evaluationLoading: boolean;
   evaluationError: string | null;
   evaluateProblem: () => void;
+  evaluationHistory: EvaluationRunItem[];
+  evaluationHistoryTotal: number;
+  evaluationHistoryLoading: boolean;
+  evaluationHistoryError: string | null;
+  loadMoreEvaluationHistory: () => void;
 }
 
 export function useProblemExplorer(): ProblemExplorerState {
@@ -45,10 +52,17 @@ export function useProblemExplorer(): ProblemExplorerState {
   const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
   const [evaluationLoading, setEvaluationLoading] = useState(false);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const [evaluationHistory, setEvaluationHistory] = useState<EvaluationRunItem[]>([]);
+  const [evaluationHistoryTotal, setEvaluationHistoryTotal] = useState(0);
+  const [evaluationHistoryLoading, setEvaluationHistoryLoading] = useState(false);
+  const [evaluationHistoryError, setEvaluationHistoryError] = useState<string | null>(null);
+  const [evaluationHistoryRefreshVersion, setEvaluationHistoryRefreshVersion] = useState(0);
   const solutionControllerRef = useRef<AbortController | null>(null);
   const solutionRequestIdRef = useRef(0);
   const evaluationControllerRef = useRef<AbortController | null>(null);
   const evaluationRequestIdRef = useRef(0);
+  const evaluationHistoryControllerRef = useRef<AbortController | null>(null);
+  const evaluationHistoryRequestIdRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -106,11 +120,58 @@ export function useProblemExplorer(): ProblemExplorerState {
   }, [selectedProblemId]);
 
   useEffect(() => {
+    if (selectedProblemId === null) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const requestId = evaluationHistoryRequestIdRef.current + 1;
+    evaluationHistoryRequestIdRef.current = requestId;
+    evaluationHistoryControllerRef.current?.abort();
+    evaluationHistoryControllerRef.current = controller;
+    setEvaluationHistory([]);
+    setEvaluationHistoryTotal(0);
+    setEvaluationHistoryError(null);
+    setEvaluationHistoryLoading(true);
+
+    void getEvaluationHistory({
+      problemId: selectedProblemId,
+      limit: 20,
+      offset: 0,
+      signal: controller.signal,
+    })
+      .then((result) => {
+        if (requestId === evaluationHistoryRequestIdRef.current && !controller.signal.aborted) {
+          setEvaluationHistory(result.items);
+          setEvaluationHistoryTotal(result.total);
+        }
+      })
+      .catch((error: unknown) => {
+        if (requestId === evaluationHistoryRequestIdRef.current && !controller.signal.aborted) {
+          setEvaluationHistoryError(getErrorMessage(error, "evaluation"));
+        }
+      })
+      .finally(() => {
+        if (requestId === evaluationHistoryRequestIdRef.current && !controller.signal.aborted) {
+          setEvaluationHistoryLoading(false);
+          evaluationHistoryControllerRef.current = null;
+        }
+      });
+
+    return () => {
+      controller.abort();
+      evaluationHistoryRequestIdRef.current += 1;
+    };
+  }, [evaluationHistoryRefreshVersion, selectedProblemId]);
+
+  useEffect(() => {
     return () => {
       solutionControllerRef.current?.abort();
       solutionRequestIdRef.current += 1;
       evaluationControllerRef.current?.abort();
       evaluationRequestIdRef.current += 1;
+      evaluationHistoryControllerRef.current?.abort();
+      evaluationHistoryRequestIdRef.current += 1;
     };
   }, []);
 
@@ -126,6 +187,9 @@ export function useProblemExplorer(): ProblemExplorerState {
       evaluationControllerRef.current?.abort();
       evaluationControllerRef.current = null;
       evaluationRequestIdRef.current += 1;
+      evaluationHistoryControllerRef.current?.abort();
+      evaluationHistoryControllerRef.current = null;
+      evaluationHistoryRequestIdRef.current += 1;
       setSelectedProblemId(problemId);
       setProblem(null);
       setProblemLoading(true);
@@ -136,6 +200,10 @@ export function useProblemExplorer(): ProblemExplorerState {
       setEvaluation(null);
       setEvaluationLoading(false);
       setEvaluationError(null);
+      setEvaluationHistory([]);
+      setEvaluationHistoryTotal(0);
+      setEvaluationHistoryLoading(false);
+      setEvaluationHistoryError(null);
     },
     [selectedProblemId],
   );
@@ -208,9 +276,51 @@ export function useProblemExplorer(): ProblemExplorerState {
         if (isCurrentRequest()) {
           setEvaluationLoading(false);
           evaluationControllerRef.current = null;
+          setEvaluationHistoryRefreshVersion((version) => version + 1);
         }
       });
   }, [evaluationLoading, problem]);
+
+  const loadMoreEvaluationHistory = useCallback(() => {
+    if (
+      selectedProblemId === null ||
+      evaluationHistoryLoading ||
+      evaluationHistory.length >= evaluationHistoryTotal
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const requestId = evaluationHistoryRequestIdRef.current + 1;
+    evaluationHistoryRequestIdRef.current = requestId;
+    evaluationHistoryControllerRef.current = controller;
+    setEvaluationHistoryLoading(true);
+    setEvaluationHistoryError(null);
+
+    void getEvaluationHistory({
+      problemId: selectedProblemId,
+      limit: 20,
+      offset: evaluationHistory.length,
+      signal: controller.signal,
+    })
+      .then((result) => {
+        if (requestId === evaluationHistoryRequestIdRef.current && !controller.signal.aborted) {
+          setEvaluationHistory((items) => [...items, ...result.items]);
+          setEvaluationHistoryTotal(result.total);
+        }
+      })
+      .catch((error: unknown) => {
+        if (requestId === evaluationHistoryRequestIdRef.current && !controller.signal.aborted) {
+          setEvaluationHistoryError(getErrorMessage(error, "evaluation"));
+        }
+      })
+      .finally(() => {
+        if (requestId === evaluationHistoryRequestIdRef.current && !controller.signal.aborted) {
+          setEvaluationHistoryLoading(false);
+          evaluationHistoryControllerRef.current = null;
+        }
+      });
+  }, [evaluationHistory, evaluationHistoryLoading, evaluationHistoryTotal, selectedProblemId]);
 
   return {
     problems,
@@ -229,5 +339,10 @@ export function useProblemExplorer(): ProblemExplorerState {
     evaluationLoading,
     evaluationError,
     evaluateProblem,
+    evaluationHistory,
+    evaluationHistoryTotal,
+    evaluationHistoryLoading,
+    evaluationHistoryError,
+    loadMoreEvaluationHistory,
   };
 }

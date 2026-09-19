@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, createEvaluation, createSolution, getProblem, getProblems } from "./api";
+import {
+  ApiError,
+  createEvaluation,
+  createSolution,
+  getEvaluationHistory,
+  getEvaluationRun,
+  getProblem,
+  getProblems,
+} from "./api";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -84,6 +92,28 @@ describe("api client", () => {
     });
     expect(String(request?.body)).not.toContain("code");
     expect(String(request?.body)).not.toContain("prompt");
+  });
+
+  it("loads evaluation history with same-origin credentials and an abort signal", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      jsonResponse({ items: [], total: 0, limit: 20, offset: 0 }),
+    );
+
+    await expect(
+      getEvaluationHistory({ problemId: 7, limit: 20, offset: 0, signal: controller.signal }),
+    ).resolves.toEqual({ items: [], total: 0, limit: 20, offset: 0 });
+    await expect(getEvaluationRun("run/id", controller.signal)).resolves.toMatchObject({ items: [] });
+
+    expect(fetchMock.mock.calls[0]).toEqual([
+      "/api/evaluations?problem_id=7&limit=20&offset=0",
+      { credentials: "same-origin", signal: controller.signal },
+    ]);
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/evaluations/run%2Fid",
+      { credentials: "same-origin", signal: controller.signal },
+    ]);
+    expect(String(fetchMock.mock.calls[0][1])).not.toContain("session");
   });
 
   it("converts network and HTTP failures to ApiError", async () => {

@@ -1,5 +1,11 @@
-import type { EvaluationResponse, ProblemDetail, SolutionResponse } from "../lib/api";
+import type {
+  EvaluationResponse,
+  EvaluationRunItem,
+  ProblemDetail,
+  SolutionResponse,
+} from "../lib/api";
 
+import { EvaluationHistory } from "./evaluation-history";
 import { MarkdownContent } from "./markdown-content";
 import { SolutionResult } from "./solution-result";
 import { EvaluationResult } from "./evaluation-result";
@@ -26,6 +32,11 @@ interface ProblemDetailPanelProps {
   evaluationLoading: boolean;
   evaluationError: string | null;
   onEvaluate: () => void;
+  evaluationHistory: EvaluationRunItem[];
+  evaluationHistoryTotal: number;
+  evaluationHistoryLoading: boolean;
+  evaluationHistoryError: string | null;
+  onLoadMoreEvaluationHistory: () => void;
 }
 
 export function ProblemDetailPanel({
@@ -40,6 +51,11 @@ export function ProblemDetailPanel({
   evaluationLoading,
   evaluationError,
   onEvaluate,
+  evaluationHistory,
+  evaluationHistoryTotal,
+  evaluationHistoryLoading,
+  evaluationHistoryError,
+  onLoadMoreEvaluationHistory,
 }: ProblemDetailPanelProps) {
   if (loading) {
     return (
@@ -113,6 +129,13 @@ export function ProblemDetailPanel({
         evaluation={evaluation}
         loading={evaluationLoading}
         error={evaluationError}
+      />
+      <EvaluationHistory
+        items={evaluationHistory}
+        total={evaluationHistoryTotal}
+        loading={evaluationHistoryLoading}
+        error={evaluationHistoryError}
+        onLoadMore={onLoadMoreEvaluationHistory}
       />
     </div>
   );

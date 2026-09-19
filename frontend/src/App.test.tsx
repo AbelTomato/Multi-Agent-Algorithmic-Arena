@@ -54,6 +54,9 @@ function mockSuccessfulApi(solutionResponse?: unknown) {
         summary: "通过当前版本评测用例",
       });
     }
+    if (url.includes("/api/evaluations?")) {
+      return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
+    }
     throw new Error(`Unexpected request: ${url} ${init?.method ?? "GET"}`);
   });
 }
@@ -95,6 +98,56 @@ describe("App", () => {
 
     expect(await screen.findByText("暂无可用题目")).toBeInTheDocument();
     expect(screen.getByText("选择一道题目开始")).toBeInTheDocument();
+  });
+
+  it("loads and renders only structured evaluation history for the selected problem", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/problems")) return jsonResponse(problems);
+      if (url.endsWith("/api/problems/1")) return jsonResponse(problemDetail);
+      if (url.includes("/api/evaluations?problem_id=1")) {
+        return jsonResponse({
+          items: [
+            {
+              evaluation_id: "11111111-1111-4111-8111-111111111111",
+              problem_id: 1,
+              problem_slug: "two-sum",
+              language: "python",
+              run_status: "FAILED",
+              judge_status: null,
+              case_version: "v1",
+              case_count: 9,
+              executed_count: null,
+              passed_count: null,
+              failed_case_index: null,
+              summary: "评测执行服务暂不可用",
+              error_category: "CONTROLLER_UNAVAILABLE",
+              created_at: "2026-09-19T04:30:00Z",
+              finished_at: "2026-09-19T04:30:01Z",
+              duration_ms: 1000,
+            },
+          ],
+          total: 1,
+          limit: 20,
+          offset: 0,
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    await selectFirstProblem();
+
+    expect(await screen.findByRole("heading", { name: "评测历史", level: 2 })).toBeInTheDocument();
+    expect(screen.getByText("FAILED")).toBeInTheDocument();
+    expect(screen.getByText("评测执行服务暂不可用")).toBeInTheDocument();
+    expect(screen.queryByText("候选源码")).not.toBeInTheDocument();
+    const historyRequest = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes("/api/evaluations?problem_id=1"),
+    );
+    expect(historyRequest?.[1]).toMatchObject({
+      credentials: "same-origin",
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("displays detail loading errors", async () => {
