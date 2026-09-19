@@ -30,6 +30,7 @@ services:
       - "127.0.0.1:8000:8000"
     networks:
       - arena_private
+      - arena_sandbox
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 10s
@@ -40,6 +41,13 @@ services:
 networks:
   arena_private:
     driver: bridge
+  arena_sandbox:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
 
 volumes:
   postgres_data:

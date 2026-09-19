@@ -1,0 +1,27 @@
+[Unit]
+Description=Multi-Agent Algorithmic Arena sandbox controller
+Wants=network-online.target
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=arena-sandbox
+Group=arena-sandbox
+SupplementaryGroups=docker
+Environment=ARENA_SANDBOX_LISTEN_ADDR=172.30.0.1:8001
+Environment=SANDBOX_DOCKER_NETWORK=app_arena_sandbox
+Environment=ARENA_SANDBOX_AUDIT_LOG=/var/lib/multi-agent-arena-sandbox-audit/tasks.jsonl
+ExecStartPre=/usr/local/libexec/multi-agent-arena/check-sandbox-network
+ExecStart=/usr/local/libexec/multi-agent-arena/arena-sandbox-controller
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+StateDirectory=multi-agent-arena-sandbox-audit
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

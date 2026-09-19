@@ -13,6 +13,9 @@ umask 077
 : "${LOG_WINDOW:=15m}"
 : "${NGINX_ACCESS_LOG:=/var/log/nginx/multi-agent-arena.access.log}"
 : "${NGINX_ERROR_LOG:=/var/log/nginx/multi-agent-arena.error.log}"
+: "${SANDBOX_CONTROLLER_SERVICE:=multi-agent-arena-sandbox-controller.service}"
+: "${SANDBOX_CONTROLLER_URL:=http://172.30.0.1:8001}"
+: "${EVALUATION_ENABLED:=false}"
 
 failures=()
 record_failure() {
@@ -45,6 +48,21 @@ check_http() {
     if ! curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
         -o /dev/null "$url"; then
         record_failure "$name HTTP check failed"
+    fi
+}
+
+check_sandbox_controller() {
+    if ! systemctl is-active --quiet "$SANDBOX_CONTROLLER_SERVICE"; then
+        record_failure "sandbox controller systemd inactive"
+    fi
+    check_http "sandbox controller" "${SANDBOX_CONTROLLER_URL%/}/health"
+}
+
+check_exited_arena_tasks() {
+    if docker ps --all --quiet \
+        --filter 'label=io.arena.sandbox.owner=true' \
+        --filter 'status=exited' | grep -q .; then
+        record_failure "exited Arena task residue detected"
     fi
 }
 
@@ -98,6 +116,10 @@ check_docker_health backend app-backend-1
 check_docker_health postgres app-postgres-1
 check_http health http://127.0.0.1/health
 check_http problems http://127.0.0.1/api/problems
+if [[ "$EVALUATION_ENABLED" == true ]]; then
+    check_sandbox_controller
+    check_exited_arena_tasks
+fi
 check_disk
 check_backup
 check_sensitive_logs
@@ -107,4 +129,8 @@ if ((${#failures[@]} > 0)); then
     exit 1
 fi
 
-printf 'monitor_ok checked=backend,postgres,http,disk,backup,logs\n'
+if [[ "$EVALUATION_ENABLED" == true ]]; then
+    printf 'monitor_ok checked=backend,postgres,http,sandbox,disk,backup,logs\n'
+else
+    printf 'monitor_ok checked=backend,postgres,http,disk,backup,logs\n'
+fi

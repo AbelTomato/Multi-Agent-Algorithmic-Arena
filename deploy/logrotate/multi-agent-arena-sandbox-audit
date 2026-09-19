@@ -1,0 +1,10 @@
+/var/lib/multi-agent-arena-sandbox-audit/tasks.jsonl {
+    daily
+    rotate 3
+    maxage 3
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 arena-sandbox arena-sandbox
+}
