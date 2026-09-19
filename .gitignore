@@ -11,3 +11,5 @@ __pycache__/
 .clinerules/
 .tools/
 .local/
+docs/实施计划/
+docs/MVP开发构想.md
