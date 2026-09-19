@@ -10,10 +10,12 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
 type DockerCLI struct {
 	command commandFactory
+	audit   *AuditLogger
 }
 
 func NewDockerCLI() *DockerCLI {
@@ -22,13 +24,24 @@ func NewDockerCLI() *DockerCLI {
 	})
 }
 
+func NewDockerCLIWithAudit(audit *AuditLogger) *DockerCLI {
+	return newDockerCLIForCommandWithAudit(func(ctx context.Context, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "docker", args...)
+	}, audit)
+}
+
 type commandFactory func(context.Context, ...string) *exec.Cmd
 
 func newDockerCLIForCommand(command commandFactory) *DockerCLI {
-	return &DockerCLI{command: command}
+	return newDockerCLIForCommandWithAudit(command, nil)
+}
+
+func newDockerCLIForCommandWithAudit(command commandFactory, audit *AuditLogger) *DockerCLI {
+	return &DockerCLI{command: command, audit: audit}
 }
 
 func (docker *DockerCLI) Run(ctx context.Context, args []string, stdin []byte, collector *OutputCollector) (int, InspectResult, error) {
+	started := time.Now()
 	taskID, ok := taskIDFromRunArgs(args)
 	if !ok {
 		return 0, InspectResult{}, errors.New("missing managed task ID")
@@ -58,15 +71,32 @@ func (docker *DockerCLI) Run(ctx context.Context, args []string, stdin []byte, c
 	readers.Wait()
 
 	inspect := docker.inspectOwned(taskID)
-	docker.cleanupOwned(taskID)
+	cleanupCompleted := docker.cleanupOwned(taskID)
 	if err == nil {
-		return 0, inspect, nil
+		return docker.finishAuditedRun(taskID, 0, inspect, "completed", cleanupCompleted, started)
 	}
 	var exitError *exec.ExitError
 	if errors.As(err, &exitError) {
-		return exitError.ExitCode(), inspect, nil
+		return docker.finishAuditedRun(taskID, exitError.ExitCode(), inspect, "non_zero_exit", cleanupCompleted, started)
+	}
+	if auditErr := docker.writeAudit(taskID, nil, inspect, "docker_error", cleanupCompleted, started); auditErr != nil {
+		return 0, inspect, auditErr
 	}
 	return 0, inspect, err
+}
+
+func (docker *DockerCLI) finishAuditedRun(taskID string, exitCode int, inspect InspectResult, outcome string, cleanupCompleted bool, started time.Time) (int, InspectResult, error) {
+	if err := docker.writeAudit(taskID, &exitCode, inspect, outcome, cleanupCompleted, started); err != nil {
+		return 0, inspect, err
+	}
+	return exitCode, inspect, nil
+}
+
+func (docker *DockerCLI) writeAudit(taskID string, exitCode *int, inspect InspectResult, outcome string, cleanupCompleted bool, started time.Time) error {
+	if docker.audit == nil {
+		return nil
+	}
+	return docker.audit.Write(newRuntimeAudit(taskID, exitCode, inspect, outcome, cleanupCompleted, started))
 }
 
 func copyOutput(readers *sync.WaitGroup, source io.Reader, write func([]byte) bool, cancel context.CancelFunc) {
@@ -98,13 +128,14 @@ func (docker *DockerCLI) inspectOwned(taskID string) InspectResult {
 	return InspectResult{OOMKilled: state.OOMKilled}
 }
 
-func (docker *DockerCLI) cleanupOwned(taskID string) {
+func (docker *DockerCLI) cleanupOwned(taskID string) bool {
 	labels, err := docker.command(context.Background(), "inspect", "--format", "{{index .Config.Labels \""+ArenaOwnershipLabel+"\"}}:{{index .Config.Labels \""+ArenaTaskIDLabel+"\"}}", taskID).Output()
 	if err != nil || strings.TrimSpace(string(labels)) != "true:"+taskID {
-		return
+		return false
 	}
-	_ = docker.command(context.Background(), "stop", "--time", "0", taskID).Run()
-	_ = docker.command(context.Background(), "rm", "--force", taskID).Run()
+	stopErr := docker.command(context.Background(), "stop", "--time", "0", taskID).Run()
+	removeErr := docker.command(context.Background(), "rm", "--force", taskID).Run()
+	return stopErr == nil && removeErr == nil
 }
 
 func (docker *DockerCLI) ListManagedTasks(ctx context.Context) ([]ManagedTask, error) {

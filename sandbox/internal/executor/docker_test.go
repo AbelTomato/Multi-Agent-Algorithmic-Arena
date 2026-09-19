@@ -77,6 +77,55 @@ func TestDockerCLIListsManagedTasksWithFullContainerIdentifiers(t *testing.T) {
 	}
 }
 
+func TestDockerCLIWritesSanitizedRuntimeAuditAfterCleanup(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "sandbox-audit.jsonl")
+	t.Setenv("ARENA_DOCKER_HELPER", "1")
+	t.Setenv("ARENA_DOCKER_HELPER_LOG", filepath.Join(t.TempDir(), "docker-cli.log"))
+	audit, err := NewAuditLogger(logPath)
+	if err != nil {
+		t.Fatalf("NewAuditLogger() error = %v", err)
+	}
+	docker := newDockerCLIForCommandWithAudit(testDockerCommand, audit)
+	taskID := "arena-task-audited"
+	candidateCode := "print('candidate-secret')"
+
+	exitCode, inspect, err := docker.Run(
+		context.Background(),
+		[]string{
+			"run", "--name", taskID,
+			"--label", ArenaOwnershipLabel + "=true",
+			"--label", ArenaTaskIDLabel + "=" + taskID,
+			"--network", "none", "--read-only",
+			"--tmpfs", "/tmp:size=64m,noexec", "--user", "65534:65534",
+			"--cpus", "1", "--memory", "128m", "--memory-swap", "128m",
+			"--pids-limit", "32", "--cap-drop", "ALL",
+			"--security-opt", "no-new-privileges", "-i", RuntimeImage,
+			"python3", "-c", candidateCode,
+		},
+		[]byte(`{"secret":"stdin-secret"}`),
+		NewOutputCollector(64*1024),
+	)
+	if err != nil || exitCode != 0 || inspect.OOMKilled {
+		t.Fatalf("Run() = (%d, %#v, %v), want successful non-OOM execution", exitCode, inspect, err)
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	line := strings.TrimSpace(string(content))
+	for _, forbidden := range []string{"candidate-secret", "stdin-secret", "stdout", "stderr", "api_key", "password"} {
+		if strings.Contains(line, forbidden) {
+			t.Fatalf("audit record contains forbidden value %q: %s", forbidden, line)
+		}
+	}
+	for _, required := range []string{"\"event\":\"arena_task\"", "\"task_id\":\"arena-task-audited\"", "\"network_mode\":\"none\"", "\"read_only\":true", "\"cleanup_completed\":true", "\"runtime_image\":"} {
+		if !strings.Contains(line, required) {
+			t.Fatalf("audit record missing %q: %s", required, line)
+		}
+	}
+}
+
 func containsArgument(arguments []string, expected string) bool {
 	for _, argument := range arguments {
 		if argument == expected {
@@ -120,7 +169,7 @@ func TestDockerCLIHelperProcess(t *testing.T) {
 		} else if strings.Contains(format, ".Id") {
 			_, _ = io.WriteString(os.Stdout, "container-unit\t/arena-task-container-unit\ttrue\tarena-task-container-unit")
 		} else {
-			_, _ = io.WriteString(os.Stdout, "true:arena-task-unit")
+			_, _ = io.WriteString(os.Stdout, "true:"+args[len(args)-1])
 		}
 	case "stop", "rm":
 	default:

@@ -23,7 +23,9 @@ GO=/home/abeltomato/workspace/projects/Multi-Agent-Algorithmic-Arena/.tools/go-1
 "$GO" run ./cmd/controller
 ```
 
-控制器固定监听 `127.0.0.1:8001`。启动控制器本身不会创建容器；只有收到有效的 `POST /execute` 请求才会调用 Docker CLI。
+控制器默认监听 `127.0.0.1:8001`。启动控制器本身不会创建容器；只有收到有效的 `POST /execute` 请求才会调用 Docker CLI。
+
+受控的同机 ECS 灰度可设置 `ARENA_SANDBOX_LISTEN_ADDR=172.30.0.1:8001`，使仅连接 Docker internal bridge 的 backend 访问控制器。该变量只接受 loopback 或 RFC1918 私有 IPv4，端口必须为 `8001`；`0.0.0.0`、公网地址、主机名和其他端口都会在 Docker 初始化前被拒绝。不得将 `8001` 加入安全组、防火墙或 Nginx 公网入口。
 
 启动前，控制器会以 `io.arena.sandbox.owner=true` 过滤列出可能遗留的容器，再逐个读取容器 ID、名称、owner 标签和 task-id 标签。只有容器名称与 `arena-task-*` task-id 精确一致且两项标签都正确时，才会停止并删除它；标签不匹配的候选不会被操作。清理过程中 Docker 返回“资源不存在”按幂等成功处理；列举、inspect、stop 或 remove 的其他错误会阻止控制器启动，避免在遗留任务未处置时接受新请求。
 
@@ -81,7 +83,7 @@ ARENA_SANDBOX_INTEGRATION=1 "$GO" test ./tests/integration -run '^TestController
 
 控制器只生成固定 Docker 参数：
 
-- 固定镜像：`python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534`
+- 固定镜像：`m.daocloud.io/docker.io/library/python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534`。镜像来源可变，但必须以该精确 digest 和 `linux/amd64` 核验；当前 ECS 已从该来源拉取并核验。
 - `--network none`、`--read-only`、`--tmpfs /tmp:size=64m,noexec`
 - 非 root 用户 `65534:65534`、`--cap-drop ALL`、`no-new-privileges`
 - `--cpus 1`、`--memory 128m`、`--memory-swap 128m`、`--pids-limit 32`
@@ -99,7 +101,7 @@ ARENA_SANDBOX_INTEGRATION=1 "$GO" test ./tests/integration -run '^TestController
 | 文件系统 | `--read-only`、64 MiB `tmpfs /tmp`、无工作区/凭据/Docker Socket 挂载；真实容器根目录写入失败、`/tmp` 写入成功且第 65 MiB 写入失败 | 镜像内容与 Docker daemon 仍属可信边界 |
 | 进程与资源 | 1 CPU、128 MiB memory/swap、32 PID、5 秒候选执行墙钟、6 秒含同步清理的返回上限、64 KiB 双流输出预算；真实容器在最多 64 次 fork 尝试中受 PID 限制，256 MiB 分配取得 OOMKilled 证据 | 不是对宿主机 DoS 的完整防护，不能抵御内核漏洞 |
 | 权限 | UID/GID `65534:65534`、`--cap-drop ALL`、`no-new-privileges`；真实容器断言非 root、`CapEff` 为零和 `NoNewPrivs: 1` | 普通 Docker/runc 仍与宿主机共享内核 |
-| 控制器入口 | 固定 `127.0.0.1:8001`，请求不接受镜像、挂载、命令、资源限制或 task ID | Docker daemon 权限仍然高，应只在受控本机运行 |
+| 控制器入口 | 默认 `127.0.0.1:8001`；受控同机 ECS 仅允许 Docker internal bridge 网关 `172.30.0.1:8001`，请求不接受镜像、挂载、命令、资源限制或 task ID | Docker daemon 权限仍然高；同机 ECS 会与业务进程和凭据共置，不是强隔离 |
 
 未安装或引入新的隔离运行时。基于当前代码和已有本地证据的选型结论如下：
 

@@ -27,6 +27,10 @@ func (docker *countingDocker) Run(context.Context, []string, []byte, *OutputColl
 func TestBuildDockerRunArgsUsesFixedLimitsAndServerTaskID(t *testing.T) {
 	runner := NewRunner(fakeDocker{})
 	args := runner.BuildDockerRunArgs("arena-task-server-generated", "print(1)")
+	const approvedRuntimeImage = "m.daocloud.io/docker.io/library/python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534"
+	if RuntimeImage != approvedRuntimeImage {
+		t.Fatalf("RuntimeImage = %q, want approved fixed image %q", RuntimeImage, approvedRuntimeImage)
+	}
 
 	want := []string{
 		"run", "--name", "arena-task-server-generated", "--label", ArenaOwnershipLabel + "=true",
