@@ -73,12 +73,32 @@ cp .env.deploy.example .env.deploy
 chmod 600 .env.deploy
 ```
 
-生产配置默认仍为 `LLM_PROVIDER=mock`；只有经过审查的 ECS 运行环境才启用真实 Provider。PostgreSQL 仅加入 Compose 私有网络，backend 仅发布到宿主机 `127.0.0.1:8000`。
+生产配置默认仍为 `LLM_PROVIDER=mock` 且 `EVALUATION_ENABLED=false`；只有经过审查的 ECS 运行环境才启用真实 Provider。PostgreSQL 仅加入 Compose 私有网络，backend 仅发布到宿主机 `127.0.0.1:8000`。
+
+同机 ECS 评测灰度使用宿主机 systemd 控制器和仅供 backend 使用的 `arena_sandbox` internal bridge；控制器只允许监听该 bridge 网关 `172.30.0.1:8001`，不得开放 TCP/8001。控制器经 Docker daemon 运行不可信候选代码，拥有高宿主机权限；当前部署决策已接受它与 backend、PostgreSQL 和 Provider 运行时凭据同机的风险，但这不是强隔离或匿名公网代码执行安全方案。评测关闭路径是：在受保护编辑器中设置 `EVALUATION_ENABLED=false`、执行 `docker compose up -d --no-deps backend`，再停止 `multi-agent-arena-sandbox-controller.service`；不执行数据库操作。
+
+正式域名 `tomato-agent-arena.me` 使用宿主机 Nginx 终止 TLS，正式配置模板位于 [`deploy/nginx/multi-agent-arena.conf`](./deploy/nginx/multi-agent-arena.conf)。该模板要求 Let’s Encrypt 证书位于 `/etc/letsencrypt/live/tomato-agent-arena.me/`，仅允许 TLS 1.2/1.3，并将 HTTP 请求重定向到 HTTPS。ICP 备案已通过，首页底部展示备案号 [粤ICP备2026139779号-1](http://beian.miit.gov.cn)。
+
+首次在 ECS 上申请证书前，必须先确认 DNS 的 A/AAAA 记录指向 ECS、TCP/80 和 TCP/443 已按安全组策略开放，并保留公网 IP 灰度配置作为回退。以下命令只应在已确认维护窗口后由 ECS 管理员执行，不在本地开发环境运行：
+
+```bash
+sudo mkdir -p /var/www/certbot
+sudo certbot certonly --webroot \
+  -w /var/www/certbot \
+  -d tomato-agent-arena.me \
+  --deploy-hook "systemctl reload nginx"
+sudo nginx -t
+sudo systemctl reload nginx
+sudo certbot renew --dry-run
+```
+
+证书签发并通过 `nginx -t` 后，再将 ECS `.env.deploy` 中的 `CORS_ORIGINS` 设置为 `https://tomato-agent-arena.me`，重启或重建 backend 前须保留旧镜像和运行时配置。正式验收至少包括：HTTP 返回 `301`、HTTPS 首页返回 `200`、HTTPS `/health` 和 `/api/problems` 返回 `200`、证书域名匹配、TLS 1.0/1.1 被拒绝，以及首页备案链接指向工信部备案系统。
 
 备份和监控的 ECS 配置分别参见：
 
 - [`docs/实施计划/2026-09-14-自动备份方案.md`](./docs/实施计划/2026-09-14-自动备份方案.md)
 - [`docs/实施计划/2026-09-14-监控与告警方案.md`](./docs/实施计划/2026-09-14-监控与告警方案.md)
+- [`docs/实施计划/2026-09-17-ECS同机评测准入计划.md`](./docs/实施计划/2026-09-17-ECS同机评测准入计划.md)
 
 ## 启动方法
 

@@ -9,7 +9,7 @@
 - ECS 灰度环境已通过后端环境变量启用 OpenAI Compatible Provider，并完成一次受控真实请求验证；
 - 不部署 Redis；
 - 不部署 Judge0；
-- 灰度环境尚未完成安全组来源限制、Nginx 限流、专用 Key 额度/告警和 HTTPS 收口，不应视为匿名公开或正式生产服务；
+- 正式域名 HTTPS 已完成并上线；公网 IP 灰度配置保留作为回退。正式白名单、专用 Key 额度/告警、凭据轮换、备份恢复等仍未全部完成，因此不应视为高可用或匿名公网安全方案；
 - 不包含 WebSocket、异步任务和多副本高可用。
 
 明确该方案属于：
@@ -269,8 +269,8 @@ Nginx 将这些请求转发到 FastAPI。
 这样比把 API 配置成独立域名更简单：
 
 ```text
-https://arena.example.com/
-https://arena.example.com/api/problems
+https://tomato-agent-arena.me/
+https://tomato-agent-arena.me/api/problems
 ```
 
 Nginx 需要配置 SPA fallback：
@@ -311,14 +311,14 @@ deploy/nginx/multi-agent-arena.conf
 ```nginx
 server {
     listen 80;
-    server_name arena.example.com;
+    server_name tomato-agent-arena.me;
 
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name arena.example.com;
+    server_name tomato-agent-arena.me;
 
     root /srv/multi-agent-arena/frontend/current;
     index index.html;
@@ -353,26 +353,44 @@ server {
 
 ## 9. HTTPS 与域名
 
-目标环境使用 Certbot + Let’s Encrypt 作为经典 Nginx 方案；截至 2026-09-10，域名仍在 ICP 审核，HTTPS 尚未启用：
+目标环境使用 Certbot + Let’s Encrypt 作为经典 Nginx 方案。正式域名为 `tomato-agent-arena.me`，本地正式配置模板为 `/home/abeltomato/workspace/projects/Multi-Agent-Algorithmic-Arena/deploy/nginx/multi-agent-arena.conf`；公网 IP 灰度模板仍独立保留，不得用它替代正式域名配置。
 
 ```bash
-sudo apt install nginx certbot python3-certbot-nginx
-sudo certbot --nginx -d arena.example.com
+sudo mkdir -p /var/www/certbot
+sudo certbot certonly --webroot \
+  -w /var/www/certbot \
+  -d tomato-agent-arena.me \
+  --deploy-hook "systemctl reload nginx"
 ```
 
 说明：
 
-- 域名 A/AAAA 记录指向 VPS；
+- 域名 A/AAAA 记录指向 ECS；如果配置了 AAAA 记录，IPv6 也必须能够访问同一 Nginx 入口；
 - 80 端口必须可访问；
 - 443 端口必须开放；
-- Certbot 自动配置证书和 Nginx；
+- `/home/abeltomato/workspace/projects/Multi-Agent-Algorithmic-Arena/deploy/nginx/multi-agent-arena.conf` 中的 80 端口负责 ACME challenge 和 HTTP 到 HTTPS 跳转，443 端口负责 TLS；
+- 证书申请成功后，先执行 `sudo nginx -t`，再执行 `sudo systemctl reload nginx`；
+- Certbot 的续期任务使用 deploy hook 在证书更新后 reload Nginx；
+- 生产环境 `.env.deploy` 的 `CORS_ORIGINS` 必须设置为 `https://tomato-agent-arena.me`；
 - 需要测试自动续期：
 
 ```bash
 sudo certbot renew --dry-run
 ```
 
-这部分会作为待用户在真实 VPS 上执行的命令记录。不会在当前环境自动执行。
+这部分命令只应在真实 ECS 上执行；本地开发环境不会自动申请证书、修改 DNS、防火墙或生产 Nginx。
+
+正式配置的 TLS 基线为：
+
+```nginx
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_session_timeout 1d;
+ssl_session_cache shared:SSL:10m;
+ssl_session_tickets off;
+add_header Strict-Transport-Security "max-age=31536000" always;
+```
+
+HSTS 只放在正式 HTTPS server 中；公网 IP 灰度 HTTP 配置不启用 HSTS。
 
 ---
 
@@ -427,7 +445,7 @@ APP_NAME="Multi-Agent Algorithmic Arena API"
 DEBUG=false
 DATABASE_URL=postgresql+asyncpg://arena_app:CHANGE_ME@postgres:5432/multi_agent_arena
 AGENT_RETRY_COUNT=1
-CORS_ORIGINS=https://arena.example.com
+CORS_ORIGINS=https://tomato-agent-arena.me
 
 POSTGRES_DB=multi_agent_arena
 POSTGRES_USER=arena_app
@@ -575,7 +593,8 @@ docker compose exec -T postgres \
 - 2026-09-13 候选镜像 `app-backend:412ba74` 已在 ECS 重建并健康运行；`/health`、`/api/problems` 的本机及公网 IP 访问返回 HTTP 200；
 - 已完成一次 PostgreSQL 备份，文件权限为 `600`；
 - 已完成一次受控真实 LLM 请求，网页端能够返回解题结果；
-- 尚未完成：安全组正式白名单、Nginx `/api/solutions` 限流和 429 验证、专用 Key 额度/费用告警、密码轮换、异地备份和恢复演练、正式域名、HTTPS 和 Certbot 自动续期。
+- 已完成：正式域名 DNS、Let’s Encrypt 证书、Nginx HTTPS、HTTP 到 HTTPS 跳转、TLS 1.2/1.3、HSTS、Certbot 自动续期和正式域名 CORS；
+- 尚未完成：安全组正式白名单、专用 Key 额度/费用告警、生产 API Key 与 PostgreSQL 密码轮换、异地备份和恢复演练。
 
 ### 15.2 验证命令模板
 
@@ -613,9 +632,9 @@ Nginx 验证：
 ```bash
 sudo nginx -t
 sudo systemctl reload nginx
-curl -I https://arena.example.com/
-curl -I https://arena.example.com/health
-curl https://arena.example.com/api/problems
+curl -I https://tomato-agent-arena.me/
+curl -I https://tomato-agent-arena.me/health
+curl https://tomato-agent-arena.me/api/problems
 ```
 
 浏览器验收：
@@ -633,6 +652,6 @@ curl https://arena.example.com/api/problems
 - 公网不能访问 `5432`；
 - 公网不能直接访问 `8000`；
 - Nginx 未授权访问被拒绝；
-- 当前公网 IP + HTTP 已验证，正式域名下应验证 HTTP 自动跳转 HTTPS；
+- 正式域名 `tomato-agent-arena.me` 已验证 HTTP 自动跳转 HTTPS、HTTPS 首页、`/health`、`/api/problems`、备案号展示和正式 CORS；
 - CORS 不允许未知来源；
 - 日志不包含密码或密钥。

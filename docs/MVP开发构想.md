@@ -220,9 +220,9 @@ MVP 前端只需要实现：
 
 真实 Provider 冒烟、ECS 部署、任意语言候选程序、匿名/公网执行和更强隔离运行时仍不属于当前范围，需独立审批。
 
-### 十一、当前仍未决的事项
+### 十一、当前状态与未决事项
 
-1. **部署平台**：已选择 Alibaba Cloud Linux 3 ECS（2 vCPU、约 2 GiB RAM），采用宿主机 Nginx + Docker Compose（PostgreSQL/FastAPI）部署；当前通过公网 IP + HTTP 提供验证环境。
-2. **正式域名与 HTTPS**：`tomato-agent-arena.me` 仍在 ICP 审核中，DNS 正式切换、Nginx `server_name`、Certbot 和 HTTPS 尚未完成。
-3. **真实 Provider 生产启用**：OpenAI Compatible Provider 适配器已完成；尚未执行真实 API 请求或 ECS 重新部署。
+1. **部署平台**：已选择 Alibaba Cloud Linux 3 ECS（2 vCPU、约 2 GiB RAM），采用宿主机 Nginx + Docker Compose（PostgreSQL/FastAPI）部署；公网 IP 灰度入口保留作为回退，正式域名入口已启用。
+2. **正式域名与 HTTPS**：ICP 备案已完成，`tomato-agent-arena.me` 的 A 记录已指向 ECS `47.119.120.86`；Nginx `server_name`、Let’s Encrypt 证书、HTTP 到 HTTPS 跳转、TLS 1.2/1.3、HSTS 和 Certbot 自动续期均已完成并通过线上验收。当前证书有效期至 2026-12-17。
+3. **真实 Provider 生产启用**：OpenAI Compatible Provider 适配器已完成，并已在 ECS 灰度环境完成受控真实请求验证和 backend 重部署；凭据轮换、额度/费用告警仍需独立收口。
 4. **具体模型及其参数**：生产启用前设置模型名称、最大输出长度、超时和重试参数，并在 Provider 平台配置额度和费用限额。
