@@ -2,9 +2,12 @@
 
 import asyncio
 from collections.abc import AsyncGenerator, Callable
+from datetime import datetime, timezone
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents.factory import get_agent
@@ -20,7 +23,9 @@ from app.judges.client import (
     ControllerUnavailableError,
 )
 from app.main import app
+from app.models.evaluation_run import EvaluationErrorCategory, EvaluationRun, EvaluationRunStatus
 from app.models.problem import Problem
+from app.schemas.evaluation import EvaluationCreateResponse
 from app.services.evaluations import (
     AgentEvaluationError,
     EvaluationDisabledError,
@@ -28,6 +33,9 @@ from app.services.evaluations import (
     EvaluationTimeoutError,
     build_evaluation_prompt,
 )
+
+
+SESSION_HASH = "a" * 64
 
 
 CORRECT_TWO_SUM_CODE = '''import json
@@ -201,14 +209,25 @@ class TestEvaluationService:
         agent = RecordingAgent(evaluation_response())
         evaluator = RecordingEvaluator(judge_result())
 
-        result = await service(session, agent, RecordingCatalog(cases), evaluator).evaluate(1)
+        result = await service(session, agent, RecordingCatalog(cases), evaluator).evaluate(
+            1, SESSION_HASH
+        )
 
-        assert result == judge_result()
+        assert result.problem_id == judge_result().problem_id
+        assert result.status == EvaluationStatus.AC
+        assert result.run_status == "SUCCEEDED"
+        assert result.duration_ms >= 0
         assert len(agent.prompts) == 1
         assert "91" not in agent.prompts[0]
         assert "92" not in agent.prompts[0]
         assert "hidden" not in agent.prompts[0]
         assert evaluator.calls[0]["code"] == CORRECT_TWO_SUM_CODE
+        saved = (await session.scalars(select(EvaluationRun))).one()
+        assert saved.id == result.evaluation_id
+        assert saved.run_status == EvaluationRunStatus.SUCCEEDED.value
+        assert saved.judge_status == EvaluationStatus.AC.value
+        assert CORRECT_TWO_SUM_CODE not in (saved.summary or "")
+        assert "91" not in (saved.summary or "")
 
     @pytest.mark.parametrize(
         "agent_response",
@@ -244,9 +263,13 @@ class TestEvaluationService:
                 RecordingAgent(agent_response),
                 RecordingCatalog(cases),
                 evaluator,
-            ).evaluate(1)
+            ).evaluate(1, SESSION_HASH)
 
         assert evaluator.calls == []
+        saved = (await session.scalars(select(EvaluationRun))).one()
+        assert saved.run_status == EvaluationRunStatus.FAILED.value
+        assert saved.error_category == EvaluationErrorCategory.AGENT_ERROR.value
+        assert saved.summary == "Agent 未能生成可执行候选程序"
 
     async def test_maps_catalog_and_controller_failures_without_turning_them_into_candidate_errors(
         self, session: AsyncSession
@@ -255,13 +278,28 @@ class TestEvaluationService:
         catalog = RecordingCatalog(CaseNotFoundError("not configured"))
 
         with pytest.raises(CaseNotFoundError):
-            await service(session, agent, catalog, RecordingEvaluator(judge_result())).evaluate(1)
+            await service(session, agent, catalog, RecordingEvaluator(judge_result())).evaluate(
+                1, SESSION_HASH
+            )
+        assert await session.scalar(select(func.count()).select_from(EvaluationRun)) == 0
 
-        for error in (
-            ControllerBusyError(),
-            ControllerUnavailableError(),
-            ControllerTimeoutError(),
-            ControllerResponseError(),
+        for error, expected_status, expected_category in (
+            (ControllerBusyError(), EvaluationRunStatus.REJECTED, EvaluationErrorCategory.CONTROLLER_BUSY),
+            (
+                ControllerUnavailableError(),
+                EvaluationRunStatus.FAILED,
+                EvaluationErrorCategory.CONTROLLER_UNAVAILABLE,
+            ),
+            (
+                ControllerTimeoutError(),
+                EvaluationRunStatus.TIMED_OUT,
+                EvaluationErrorCategory.CONTROLLER_TIMEOUT,
+            ),
+            (
+                ControllerResponseError(),
+                EvaluationRunStatus.FAILED,
+                EvaluationErrorCategory.CONTROLLER_RESPONSE_ERROR,
+            ),
         ):
             from app.judges.base import JudgeCases
 
@@ -282,7 +320,14 @@ class TestEvaluationService:
                     RecordingAgent(evaluation_response()),
                     RecordingCatalog(cases),
                     RecordingEvaluator(error),
-                ).evaluate(1)
+                ).evaluate(1, SESSION_HASH)
+            saved = (
+                await session.scalars(select(EvaluationRun).order_by(EvaluationRun.created_at.desc()))
+            ).first()
+            assert saved is not None
+            assert saved.run_status == expected_status.value
+            assert saved.error_category == expected_category.value
+            assert "secret" not in (saved.summary or "")
 
     async def test_rejects_when_disabled_and_when_total_deadline_expires(self, session: AsyncSession) -> None:
         disabled = EvaluationService(
@@ -291,7 +336,18 @@ class TestEvaluationService:
             settings=Settings(_env_file=None, evaluation_enabled=False),
         )
         with pytest.raises(EvaluationDisabledError):
-            await disabled.evaluate(1)
+            await disabled.evaluate(1, SESSION_HASH)
+        assert await session.scalar(select(func.count()).select_from(EvaluationRun)) == 0
+
+        enabled = service(
+            session,
+            RecordingAgent(evaluation_response()),
+            RecordingCatalog(CaseNotFoundError("missing hidden case")),
+            RecordingEvaluator(judge_result()),
+        )
+        with pytest.raises(LookupError):
+            await enabled.evaluate(999, SESSION_HASH)
+        assert await session.scalar(select(func.count()).select_from(EvaluationRun)) == 0
 
         from app.judges.base import JudgeCases
 
@@ -319,7 +375,10 @@ class TestEvaluationService:
                 RecordingCatalog(cases),
                 RecordingEvaluator(judge_result()),
                 evaluation_total_timeout_seconds=0.001,
-            ).evaluate(1)
+            ).evaluate(1, SESSION_HASH)
+        timed_out = (await session.scalars(select(EvaluationRun))).one()
+        assert timed_out.run_status == EvaluationRunStatus.TIMED_OUT.value
+        assert timed_out.error_category == EvaluationErrorCategory.EVALUATION_TIMEOUT.value
 
 
 @pytest.fixture
@@ -384,7 +443,8 @@ class TestEvaluationsApi:
         expected_detail: str,
     ) -> None:
         class FailingService:
-            async def evaluate(self, problem_id: int) -> JudgeResult:
+            async def evaluate(self, problem_id: int, session_key_hash: str) -> EvaluationCreateResponse:
+                assert len(session_key_hash) == 64
                 raise error
 
         use_evaluation_service(lambda: FailingService())
@@ -396,14 +456,26 @@ class TestEvaluationsApi:
 
     def test_returns_only_evaluation_summary(self, api_client: TestClient) -> None:
         class SuccessfulService:
-            async def evaluate(self, problem_id: int) -> JudgeResult:
-                return judge_result(EvaluationStatus.WA).model_copy(
+            async def evaluate(
+                self, problem_id: int, session_key_hash: str
+            ) -> EvaluationCreateResponse:
+                assert len(session_key_hash) == 64
+                now = datetime(2026, 9, 19, 4, 30, tzinfo=timezone.utc)
+                summary_result = judge_result(EvaluationStatus.WA).model_copy(
                     update={
                         "executed_count": 2,
                         "passed_count": 1,
                         "failed_case_index": 1,
                         "summary": "第 2 个用例答案错误",
                     }
+                )
+                return EvaluationCreateResponse(
+                    **summary_result.model_dump(),
+                    evaluation_id=UUID("11111111-1111-4111-8111-111111111111"),
+                    run_status="SUCCEEDED",
+                    created_at=now,
+                    finished_at=now,
+                    duration_ms=12,
                 )
 
         use_evaluation_service(lambda: SuccessfulService())
@@ -421,4 +493,9 @@ class TestEvaluationsApi:
             "passed_count": 1,
             "failed_case_index": 1,
             "summary": "第 2 个用例答案错误",
+            "evaluation_id": "11111111-1111-4111-8111-111111111111",
+            "run_status": "SUCCEEDED",
+            "created_at": "2026-09-19T04:30:00Z",
+            "finished_at": "2026-09-19T04:30:00Z",
+            "duration_ms": 12,
         }

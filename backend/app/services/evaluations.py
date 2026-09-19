@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
@@ -12,10 +14,22 @@ from app.agents.base import Agent
 from app.config import Settings
 from app.judges.base import JudgeCases, JudgeResult
 from app.judges.catalog import CaseCatalog
-from app.judges.client import SandboxClient
+from app.judges.client import (
+    ControllerBusyError,
+    ControllerResponseError,
+    ControllerTimeoutError,
+    ControllerUnavailableError,
+    SandboxClient,
+)
 from app.judges.evaluator import Evaluator
+from app.models.evaluation_run import EvaluationErrorCategory, EvaluationRunStatus
 from app.models.problem import Problem
-from app.schemas.evaluation import AgentEvaluationOutput, MAX_AGENT_RESPONSE_BYTES
+from app.schemas.evaluation import (
+    AgentEvaluationOutput,
+    EvaluationCreateResponse,
+    MAX_AGENT_RESPONSE_BYTES,
+)
+from app.services.evaluation_runs import EvaluationRunRepository
 
 
 EVALUATION_SYSTEM_PROMPT = """你是一名算法题候选程序生成 Agent。
@@ -37,6 +51,10 @@ class AgentEvaluationError(Exception):
 
 class EvaluationTimeoutError(Exception):
     """整个评测编排超过总期限。"""
+
+
+class EvaluationPersistenceError(Exception):
+    """运行记录未能可靠写入。"""
 
 
 def build_evaluation_prompt(problem: Problem, public_cases: list[dict[str, Any]]) -> str:
@@ -75,6 +93,7 @@ class EvaluationService:
         self.settings = settings
         self.case_catalog = case_catalog or CaseCatalog()
         self.evaluator_factory = evaluator_factory or self._create_evaluator
+        self.runs = EvaluationRunRepository(session)
 
     def _create_evaluator(self) -> Evaluator:
         return Evaluator(
@@ -84,22 +103,13 @@ class EvaluationService:
             )
         )
 
-    async def evaluate(self, problem_id: int) -> JudgeResult:
+    async def evaluate(self, problem_id: int, session_key_hash: str) -> EvaluationCreateResponse:
         if not self.settings.evaluation_enabled:
             raise EvaluationDisabledError
 
-        try:
-            async with asyncio.timeout(self.settings.evaluation_total_timeout_seconds):
-                return await self._evaluate(problem_id)
-        except TimeoutError as error:
-            raise EvaluationTimeoutError from error
-
-    async def _evaluate(self, problem_id: int) -> JudgeResult:
         problem = await self.session.get(Problem, problem_id)
         if problem is None:
             raise LookupError("Problem not found")
-
-        # 题目实体已读取到内存，释放数据库事务，避免 Agent 与逐用例执行期间占用连接。
         loaded_problem = Problem(
             id=problem.id,
             slug=problem.slug,
@@ -108,6 +118,92 @@ class EvaluationService:
         )
         await self.session.rollback()
         cases = self.case_catalog.load(loaded_problem.slug)
+        run = await self.runs.create_running(
+            session_key_hash,
+            loaded_problem,
+            cases.version,
+            len(cases.all_cases),
+        )
+        monotonic_started = time.monotonic()
+        try:
+            async with asyncio.timeout(self.settings.evaluation_total_timeout_seconds):
+                result = await self._execute(loaded_problem, cases)
+        except TimeoutError as error:
+            await self._persist_failure(
+                run.id,
+                EvaluationRunStatus.TIMED_OUT,
+                EvaluationErrorCategory.EVALUATION_TIMEOUT,
+                monotonic_started,
+            )
+            raise EvaluationTimeoutError from error
+        except AgentEvaluationError:
+            await self._persist_failure(
+                run.id, EvaluationRunStatus.FAILED, EvaluationErrorCategory.AGENT_ERROR, monotonic_started
+            )
+            raise
+        except ControllerBusyError:
+            await self._persist_failure(
+                run.id,
+                EvaluationRunStatus.REJECTED,
+                EvaluationErrorCategory.CONTROLLER_BUSY,
+                monotonic_started,
+            )
+            raise
+        except ControllerTimeoutError:
+            await self._persist_failure(
+                run.id,
+                EvaluationRunStatus.TIMED_OUT,
+                EvaluationErrorCategory.CONTROLLER_TIMEOUT,
+                monotonic_started,
+            )
+            raise
+        except ControllerUnavailableError:
+            await self._persist_failure(
+                run.id,
+                EvaluationRunStatus.FAILED,
+                EvaluationErrorCategory.CONTROLLER_UNAVAILABLE,
+                monotonic_started,
+            )
+            raise
+        except ControllerResponseError:
+            await self._persist_failure(
+                run.id,
+                EvaluationRunStatus.FAILED,
+                EvaluationErrorCategory.CONTROLLER_RESPONSE_ERROR,
+                monotonic_started,
+            )
+            raise
+        except Exception:
+            await self._persist_failure(
+                run.id,
+                EvaluationRunStatus.FAILED,
+                EvaluationErrorCategory.INTERNAL_ERROR,
+                monotonic_started,
+            )
+            raise
+
+        finished_at = datetime.now(timezone.utc)
+        duration_ms = max(0, int((time.monotonic() - monotonic_started) * 1000))
+        try:
+            changed = await self.runs.mark_succeeded(run.id, result, finished_at, duration_ms)
+            if not changed:
+                raise EvaluationPersistenceError("evaluation run is no longer running")
+            await self.session.commit()
+        except Exception as error:
+            await self.session.rollback()
+            if isinstance(error, EvaluationPersistenceError):
+                raise
+            raise EvaluationPersistenceError("failed to persist evaluation result") from error
+        return EvaluationCreateResponse(
+            **result.model_dump(),
+            evaluation_id=run.id,
+            run_status="SUCCEEDED",
+            created_at=run.created_at,
+            finished_at=finished_at,
+            duration_ms=duration_ms,
+        )
+
+    async def _execute(self, loaded_problem: Problem, cases: JudgeCases) -> JudgeResult:
         prompt = build_evaluation_prompt(
             loaded_problem,
             [case.model_dump(mode="json") for case in cases.public_cases],
@@ -126,6 +222,33 @@ class EvaluationService:
             close = getattr(client, "aclose", None)
             if close is not None:
                 await close()
+
+    async def _persist_failure(
+        self,
+        run_id,
+        run_status: EvaluationRunStatus,
+        category: EvaluationErrorCategory,
+        monotonic_started: float,
+    ) -> None:
+        finished_at = datetime.now(timezone.utc)
+        duration_ms = max(0, int((time.monotonic() - monotonic_started) * 1000))
+        try:
+            changed = await self.runs.mark_failed(
+                run_id,
+                run_status,
+                category,
+                "",
+                finished_at,
+                duration_ms,
+            )
+            if not changed:
+                raise EvaluationPersistenceError("evaluation run is no longer running")
+            await self.session.commit()
+        except Exception as error:
+            await self.session.rollback()
+            if isinstance(error, EvaluationPersistenceError):
+                raise
+            raise EvaluationPersistenceError("failed to persist evaluation failure") from error
 
     async def _generate_candidate(self, prompt: str) -> AgentEvaluationOutput:
         last_error: Exception | None = None

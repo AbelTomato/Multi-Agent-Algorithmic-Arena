@@ -10,6 +10,10 @@ def test_settings_use_default_values() -> None:
     assert settings.agent_retry_count == 1
     assert settings.cors_origins == "http://localhost:5173,http://127.0.0.1:5173"
     assert settings.cors_origin_list == ["http://localhost:5173", "http://127.0.0.1:5173"]
+    assert settings.evaluation_history_enabled is True
+    assert settings.evaluation_history_cookie_secure is False
+    assert settings.evaluation_history_retention_days == 30
+    assert settings.evaluation_running_stale_minutes == 10
 
 
 def test_settings_can_be_overridden_by_environment(monkeypatch) -> None:
@@ -53,3 +57,16 @@ def test_agent_retry_count_must_be_between_zero_and_three() -> None:
     assert first is second
 
     get_settings.cache_clear()
+
+
+def test_evaluation_history_settings_enforce_safe_ranges() -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, evaluation_history_retention_days=0)
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, evaluation_history_retention_days=366)
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, evaluation_running_stale_minutes=4)
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, evaluation_running_stale_minutes=1441)

@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents.factory import get_agent
@@ -14,9 +15,12 @@ from app.config import Settings, get_settings
 from app.database import Base, get_db
 from app.main import app
 from app.models.problem import Problem
+from app.models.evaluation_run import EvaluationRun
+from app.judges.base import JudgeResult
+from app.services.evaluations import EvaluationService
 
 
-pytestmark = pytest.mark.skipif(
+controller_required = pytest.mark.skipif(
     os.getenv("ARENA_SANDBOX_INTEGRATION") != "1",
     reason="需要设置 ARENA_SANDBOX_INTEGRATION=1 并启动 Go 执行控制器",
 )
@@ -54,7 +58,7 @@ class FixedEvaluationAgent:
 
 
 @pytest.fixture
-def database_client(tmp_path) -> Iterator[tuple[TestClient, FixedEvaluationAgent]]:
+def database_client(tmp_path) -> Iterator[tuple[TestClient, FixedEvaluationAgent, async_sessionmaker]]:
     database_path = tmp_path / "evaluation_flow.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{database_path}")
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -88,21 +92,26 @@ def database_client(tmp_path) -> Iterator[tuple[TestClient, FixedEvaluationAgent
         evaluation_total_timeout_seconds=210,
     )
     try:
-        yield TestClient(app), agent
+        yield TestClient(app), agent, session_factory
     finally:
         app.dependency_overrides.clear()
         asyncio.run(engine.dispose())
 
 
+@controller_required
 def test_evaluation_api_runs_fixed_agent_through_go_controller_without_hidden_data_leaks(
-    database_client: tuple[TestClient, FixedEvaluationAgent],
+    database_client,
 ) -> None:
-    client, agent = database_client
+    client, agent, _ = database_client
 
     response = client.post("/api/evaluations", json={"problem_id": 1})
 
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert {key: payload[key] for key in (
+        "problem_id", "problem_slug", "language", "status", "case_version",
+        "case_count", "executed_count", "passed_count", "failed_case_index", "summary",
+    )} == {
         "problem_id": 1,
         "problem_slug": "two-sum",
         "language": "python",
@@ -118,3 +127,47 @@ def test_evaluation_api_runs_fixed_agent_through_go_controller_without_hidden_da
     assert "-1000000000" not in agent.prompts[0]
     assert "hidden_cases" not in agent.prompts[0]
     assert "CORRECT_TWO_SUM_CODE" not in response.text
+    assert payload["run_status"] == "SUCCEEDED"
+    assert client.get("/api/evaluations").json()["total"] == 1
+    assert client.get(f"/api/evaluations/{payload['evaluation_id']}").json()["judge_status"] == "AC"
+
+
+def test_isolated_summary_flow_and_session_ownership(database_client, monkeypatch) -> None:
+    client, agent, session_factory = database_client
+
+    class FakeEvaluator:
+        async def evaluate(self, problem_id, problem_slug, code, cases):
+            assert code == CORRECT_TWO_SUM_CODE
+            return JudgeResult(
+                problem_id=problem_id, problem_slug=problem_slug, language="python",
+                status="AC", case_version=cases.version, case_count=len(cases.all_cases),
+                executed_count=len(cases.all_cases), passed_count=len(cases.all_cases),
+                failed_case_index=None, summary="通过当前版本评测用例",
+            )
+
+    monkeypatch.setattr(EvaluationService, "_create_evaluator", lambda self: FakeEvaluator())
+    response = client.post("/api/evaluations", json={"problem_id": 1})
+    assert response.status_code == 200
+    run_id = response.json()["evaluation_id"]
+    listing = client.get("/api/evaluations?problem_id=1").json()
+    assert listing["total"] == 1
+    assert listing["items"][0]["evaluation_id"] == run_id
+    detail = client.get(f"/api/evaluations/{run_id}")
+    assert detail.status_code == 200
+    assert detail.json()["run_status"] == "SUCCEEDED"
+    assert detail.json()["judge_status"] == "AC"
+    other = TestClient(app)
+    assert other.get("/api/evaluations").json()["items"] == []
+    assert other.get(f"/api/evaluations/{run_id}").status_code == 404
+
+    async def assert_summary_only() -> None:
+        async with session_factory() as session:
+            saved = (await session.execute(select(EvaluationRun))).scalar_one()
+            text_values = " ".join(
+                value for column in EvaluationRun.__table__.columns
+                if isinstance(value := getattr(saved, column.name), str)
+            )
+            for private in (CORRECT_TWO_SUM_CODE, agent.prompts[0], "import json", "nums", "-1000000000", "stdout", "stderr"):
+                assert private not in text_values
+
+    asyncio.run(assert_summary_only())

@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=4096, gt=0)
     evaluation_enabled: bool = False
     evaluation_total_timeout_seconds: float = Field(default=210.0, gt=0)
+    evaluation_history_enabled: bool = True
+    evaluation_history_cookie_secure: bool = False
+    evaluation_history_retention_days: int = Field(default=30, ge=1, le=365)
+    evaluation_running_stale_minutes: int = Field(default=10, ge=5, le=1440)
     sandbox_controller_url: str = "http://127.0.0.1:8001"
     sandbox_controller_timeout_seconds: float = Field(default=10.0, gt=0)
 

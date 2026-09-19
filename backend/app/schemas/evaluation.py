@@ -1,8 +1,13 @@
 """评测 API 和 Agent 结构化输出的严格契约。"""
 
 from typing import Literal
+from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.judges.base import EvaluationStatus, JudgeResult
+from app.models.evaluation_run import EvaluationErrorCategory, EvaluationRunStatus
 
 
 MAX_AGENT_RESPONSE_BYTES = 128 * 1024
@@ -42,3 +47,39 @@ class AgentEvaluationOutput(BaseModel):
     @classmethod
     def validate_explanation_bytes(cls, value: str) -> str:
         return _validate_utf8_limit(value, MAX_EXPLANATION_BYTES, "explanation")
+
+
+class EvaluationCreateResponse(JudgeResult):
+    evaluation_id: UUID
+    run_status: Literal["SUCCEEDED"]
+    created_at: datetime
+    finished_at: datetime
+    duration_ms: int = Field(ge=0)
+
+
+class EvaluationRunItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    evaluation_id: UUID = Field(validation_alias="id")
+    problem_id: int
+    problem_slug: str
+    language: Literal["python"]
+    run_status: EvaluationRunStatus
+    judge_status: EvaluationStatus | None
+    case_version: str
+    case_count: int
+    executed_count: int | None
+    passed_count: int | None
+    failed_case_index: int | None
+    summary: str | None
+    error_category: EvaluationErrorCategory | None
+    created_at: datetime
+    finished_at: datetime | None
+    duration_ms: int | None
+
+
+class EvaluationRunListResponse(BaseModel):
+    items: list[EvaluationRunItem]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=50)
+    offset: int = Field(ge=0)
