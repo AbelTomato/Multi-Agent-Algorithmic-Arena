@@ -72,6 +72,10 @@ describe("App", () => {
 
     expect(await screen.findByText("题目列表")).toBeInTheDocument();
     expect(screen.getByText("MVP · 单 Agent")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "粤ICP备2026139779号-1" })).toHaveAttribute(
+      "href",
+      "http://beian.miit.gov.cn",
+    );
     expect(await screen.findByRole("button", { name: /Two Sum/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Valid Parentheses/ })).toBeInTheDocument();
 

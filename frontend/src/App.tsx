@@ -78,6 +78,17 @@ export default function App() {
           />
         </div>
       </main>
+
+      <footer className="border-t border-slate-800/80 px-5 py-6 text-center text-sm text-slate-500">
+        <a
+          href="http://beian.miit.gov.cn"
+          target="_blank"
+          rel="noreferrer"
+          className="transition-colors hover:text-cyan-300"
+        >
+          粤ICP备2026139779号-1
+        </a>
+      </footer>
     </div>
   );
 }
