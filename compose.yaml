@@ -23,6 +23,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env.deploy
+    environment:
+      EVALUATION_HISTORY_COOKIE_SECURE: ${EVALUATION_HISTORY_COOKIE_SECURE:-true}
+      EVALUATION_HISTORY_RETENTION_DAYS: ${EVALUATION_HISTORY_RETENTION_DAYS:-30}
+      EVALUATION_RUNNING_STALE_MINUTES: ${EVALUATION_RUNNING_STALE_MINUTES:-10}
     depends_on:
       postgres:
         condition: service_healthy

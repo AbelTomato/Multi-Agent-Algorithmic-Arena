@@ -15,7 +15,20 @@ Multi-Agent-Algorithmic-Arena 当前是一个单 Agent 算法题解答 MVP，并
 - Docker Compose、Nginx、ECS 公网 IP 灰度部署；
 - ECS 监控、QQ 邮箱故障告警和 PostgreSQL 自动备份。
 
-当前不包含评分、比赛状态机、多 Agent 协作、Redis、WebSocket、流式输出、登录和历史记录。评测不支持真实 Provider 验收、ECS 部署或公网匿名代码执行。
+当前提供仅匿名会话可见的评测摘要历史；不包含评分、比赛状态机、多 Agent 协作、Redis、WebSocket、流式输出、登录和账户历史。历史模块的本地验证不代表生产发布完成。
+
+### 匿名评测历史
+
+- `GET /api/evaluations?problem_id=1&limit=20&offset=0`：当前匿名会话的摘要列表，`problem_id` 可省略，`limit` 最大 50。
+- `GET /api/evaluations/{evaluation_id}`：摘要详情；其他会话或过期记录返回 404。
+- Cookie `arena_evaluation_session` 使用 HttpOnly、SameSite=Lax、Path=/api/evaluations；生产 HTTPS 应设置 `EVALUATION_HISTORY_COOKIE_SECURE=true`。浏览器只使用 `credentials: "same-origin"`，本地通过 Vite 代理同源访问。清 Cookie 或换设备后无法恢复旧历史。
+- 默认 `EVALUATION_HISTORY_ENABLED=true`、`EVALUATION_HISTORY_RETENTION_DAYS=30`、`EVALUATION_RUNNING_STALE_MINUTES=10`。启动时将超时遗留 RUNNING 标记为 INTERRUPTED；不恢复候选程序执行。
+- 只保存受控摘要，不保存候选代码、Prompt、测试输入、stdout/stderr。运行成功与 Judge AC 是独立概念。
+- 维护 CLI 从 backend 目录运行 `.venv/bin/python -m app.maintenance.evaluation_history`，默认 dry-run，仅报告截止时间和数量；显式 `--execute` 才删除过期终态并提交，RUNNING 不删除。实际持久化数据库删除必须另行批准，未自动配置定时清理。
+
+状态（2026-09-19）：历史代码及隔离 SQLite 验证已完成；生产 migration `0002` 已获批执行并校验；后端、前端和 Nginx 已获批发布，健康检查、公开首页及题目接口、后端历史 GET 和 Cookie 属性验证通过。独立 PostgreSQL 集成测试套件未运行，本次发布未发送真实评测请求，未完成管理 IP 来源下的完整公网历史交互验收。评测管理 allowlist 保持不变，历史列表同样受该入口限制。其他旧数据库仍须先完成获批的 schema 升级再部署新版后端。详情见 `docs/实施计划/2026-09-19-评测历史生产预检与发布计划.md`。
+
+本地验证：backend 运行 `LLM_PROVIDER=mock .venv/bin/python -m pytest -q tests/test_evaluation_run_model.py tests/test_evaluation_sessions.py tests/test_evaluation_history.py tests/test_evaluations.py`；frontend 运行 `npm test` 和 `npm run build`。真实 Controller 和 PostgreSQL 验证保留独立环境及审批门禁。
 
 ## 技术栈
 

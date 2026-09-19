@@ -9,6 +9,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeploymentConfigTests(unittest.TestCase):
+    def test_history_get_does_not_consume_evaluation_post_rate_limit(self) -> None:
+        for filename in ("multi-agent-arena.conf", "multi-agent-arena-gray.conf"):
+            with self.subTest(filename=filename):
+                nginx = (ROOT / "deploy" / "nginx" / filename).read_text(encoding="utf-8")
+                mapping = re.search(
+                    r"map \$request_method \$evaluation_post_limit_key\s*\{([^}]+)\}",
+                    nginx,
+                )
+                self.assertIsNotNone(mapping)
+                self.assertEqual(
+                    mapping.group(1).split(),
+                    ["default", '"";', "POST", "$binary_remote_addr;"],
+                )
+                self.assertIn(
+                    "limit_req_zone $evaluation_post_limit_key "
+                    "zone=evaluation_post_by_ip:10m rate=1r/m;",
+                    nginx,
+                )
+                self.assertNotIn(
+                    "limit_req_zone $binary_remote_addr zone=evaluation_by_ip", nginx
+                )
+
     def test_controller_unit_fails_closed_when_sandbox_network_is_not_ready(self) -> None:
         unit = (
             ROOT / "deploy" / "systemd" / "multi-agent-arena-sandbox-controller.service"
@@ -99,7 +121,7 @@ class DeploymentConfigTests(unittest.TestCase):
                 route.index(f"allow {approved_source};"),
                 route.index("deny all;"),
             )
-            self.assertIn("limit_req zone=evaluation_by_ip nodelay;", route)
+            self.assertIn("limit_req zone=evaluation_post_by_ip nodelay;", route)
             self.assertIn("limit_req_status 429;", route)
             self.assertIn("proxy_read_timeout 220s;", route)
 
