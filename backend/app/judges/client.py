@@ -9,6 +9,7 @@ from app.judges.base import EvaluationStatus, JSON_STDIO_V1
 
 EXECUTION_API_V2 = "execution-api-v2"
 PYTHON_RUNTIME_V1 = "python-3.11-v1"
+CPP_RUNTIME_V1 = "cpp-gcc-14-cpp20-v1"
 
 
 class ControllerError(Exception):
@@ -54,16 +55,20 @@ class SandboxClient:
         self,
         base_url: str = "http://127.0.0.1:8001",
         timeout: float = 10.0,
+        runtime_id: str = PYTHON_RUNTIME_V1,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        if runtime_id not in {PYTHON_RUNTIME_V1, CPP_RUNTIME_V1}:
+            raise ValueError(f"unsupported runtime: {runtime_id}")
+        self.runtime_id = runtime_id
         self._owns_client = client is None
         self.client = client or httpx.AsyncClient(timeout=timeout, trust_env=False)
 
     async def execute(self, *, code: str, stdin_input: str) -> tuple[EvaluationStatus, ExecutionResult]:
         request_data = {
             "api_version": EXECUTION_API_V2,
-            "runtime_id": PYTHON_RUNTIME_V1,
+            "runtime_id": self.runtime_id,
             "source": code,
             "stdin_input": stdin_input,
             "io_protocol": JSON_STDIO_V1,

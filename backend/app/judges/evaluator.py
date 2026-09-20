@@ -4,14 +4,15 @@ import json
 from typing import Any
 
 from app.judges.base import EvaluationStatus, JudgeCases, JudgeResult, MAX_STDIN_BYTES
-from app.judges.client import SandboxClient
+from app.judges.client import PYTHON_RUNTIME_V1, SandboxClient
 
 
 class Evaluator:
     """逐用例串行评测，首个失败后立即停止。"""
 
-    def __init__(self, sandbox_client: SandboxClient) -> None:
+    def __init__(self, sandbox_client: SandboxClient, runtime_id: str = PYTHON_RUNTIME_V1) -> None:
         self.client = sandbox_client
+        self.runtime_id = runtime_id
 
     async def evaluate(
         self, problem_id: int, problem_slug: str, code: str, cases: JudgeCases

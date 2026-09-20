@@ -412,90 +412,12 @@ def api_client(tmp_path) -> AsyncGenerator[TestClient, None]:
         asyncio_module.run(engine.dispose())
 
 
-def use_evaluation_service(factory: Callable[[], EvaluationService]) -> None:
-    app.dependency_overrides[get_evaluation_service] = factory
-
-
 class TestEvaluationsApi:
     def test_rejects_invalid_request_fields(self, api_client: TestClient) -> None:
-        assert api_client.post("/api/evaluations", json={"problem_id": 0}).status_code == 422
-        assert api_client.post("/api/evaluations", json={"problem_id": 1, "code": "client code"}).status_code == 422
+        assert api_client.post("/api/evaluations", json={"problem_id": 0}).status_code == 405
+        assert api_client.post("/api/evaluations", json={"problem_id": 1, "code": "client code"}).status_code == 405
 
-    @pytest.mark.parametrize(
-        ("error", "expected_status", "expected_detail"),
-        [
-            (LookupError(), 404, "Problem not found"),
-            (CaseNotFoundError(), 422, "Evaluation cases are not configured"),
-            (AgentEvaluationError(), 502, "Agent failed to generate an executable solution"),
-            (ControllerBusyError(), 409, "Evaluation service is busy"),
-            (ControllerUnavailableError(), 503, "Evaluation controller is unavailable"),
-            (ControllerTimeoutError(), 503, "Evaluation controller is unavailable"),
-            (ControllerResponseError(), 503, "Evaluation controller is unavailable"),
-            (EvaluationDisabledError(), 503, "Evaluation is disabled"),
-            (EvaluationTimeoutError(), 504, "Evaluation request timed out"),
-        ],
-    )
-    def test_maps_failures_to_sanitized_api_responses(
-        self,
-        api_client: TestClient,
-        error: Exception,
-        expected_status: int,
-        expected_detail: str,
-    ) -> None:
-        class FailingService:
-            async def evaluate(self, problem_id: int, session_key_hash: str) -> EvaluationCreateResponse:
-                assert len(session_key_hash) == 64
-                raise error
-
-        use_evaluation_service(lambda: FailingService())
+    def test_legacy_anonymous_evaluation_creation_is_removed(self, api_client: TestClient) -> None:
         response = api_client.post("/api/evaluations", json={"problem_id": 1})
 
-        assert response.status_code == expected_status
-        assert response.json() == {"detail": expected_detail}
-        assert "secret" not in response.text
-
-    def test_returns_only_evaluation_summary(self, api_client: TestClient) -> None:
-        class SuccessfulService:
-            async def evaluate(
-                self, problem_id: int, session_key_hash: str
-            ) -> EvaluationCreateResponse:
-                assert len(session_key_hash) == 64
-                now = datetime(2026, 9, 19, 4, 30, tzinfo=timezone.utc)
-                summary_result = judge_result(EvaluationStatus.WA).model_copy(
-                    update={
-                        "executed_count": 2,
-                        "passed_count": 1,
-                        "failed_case_index": 1,
-                        "summary": "第 2 个用例答案错误",
-                    }
-                )
-                return EvaluationCreateResponse(
-                    **summary_result.model_dump(),
-                    evaluation_id=UUID("11111111-1111-4111-8111-111111111111"),
-                    run_status="SUCCEEDED",
-                    created_at=now,
-                    finished_at=now,
-                    duration_ms=12,
-                )
-
-        use_evaluation_service(lambda: SuccessfulService())
-        response = api_client.post("/api/evaluations", json={"problem_id": 1})
-
-        assert response.status_code == 200
-        assert response.json() == {
-            "problem_id": 1,
-            "problem_slug": "two-sum",
-            "language": "python",
-            "status": "WA",
-            "case_version": "v1",
-            "case_count": 9,
-            "executed_count": 2,
-            "passed_count": 1,
-            "failed_case_index": 1,
-            "summary": "第 2 个用例答案错误",
-            "evaluation_id": "11111111-1111-4111-8111-111111111111",
-            "run_status": "SUCCEEDED",
-            "created_at": "2026-09-19T04:30:00Z",
-            "finished_at": "2026-09-19T04:30:00Z",
-            "duration_ms": 12,
-        }
+        assert response.status_code == 405

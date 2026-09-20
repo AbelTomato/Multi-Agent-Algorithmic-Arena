@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.config import get_settings
 from app.database import Base
-from app.models import evaluation_run, problem  # noqa: F401
+from app.models import evaluation, evaluation_run, permission, problem, submission  # noqa: F401
 
 
 config = context.config

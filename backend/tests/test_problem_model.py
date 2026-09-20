@@ -11,6 +11,27 @@ from app.config import get_settings
 from app.models.problem import Problem
 
 from app.database import Base
+from pydantic import ValidationError
+
+
+def test_problem_language_whitelist_accepts_supported_languages():
+    problem = Problem(
+        slug="multi-language",
+        title="Multi Language",
+        description="description",
+        allowed_languages=["python", "cpp"],
+    )
+
+    assert problem.allowed_languages == ["python", "cpp"]
+
+
+def test_problem_language_whitelist_rejects_invalid_values():
+    for languages in ([], ["javascript"], ["python", "python"]):
+        try:
+            Problem.validate_allowed_languages(languages)
+        except (ValueError, ValidationError):
+            continue
+        raise AssertionError(f"expected invalid languages to be rejected: {languages}")
 
 
 setting = get_settings()
@@ -26,6 +47,8 @@ def test_problem_table_metadata():
         "slug",
         "title",
         "description",
+        "allowed_languages",
+        "active_case_version",
         "created_at",
         "updated_at"
     }

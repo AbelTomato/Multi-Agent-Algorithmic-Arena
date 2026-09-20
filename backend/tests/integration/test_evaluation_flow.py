@@ -132,42 +132,13 @@ def test_evaluation_api_runs_fixed_agent_through_go_controller_without_hidden_da
     assert client.get(f"/api/evaluations/{payload['evaluation_id']}").json()["judge_status"] == "AC"
 
 
-def test_isolated_summary_flow_and_session_ownership(database_client, monkeypatch) -> None:
-    client, agent, session_factory = database_client
+def test_legacy_anonymous_creation_is_removed_from_isolated_evaluation_flow(database_client) -> None:
+    client, _, _ = database_client
 
-    class FakeEvaluator:
-        async def evaluate(self, problem_id, problem_slug, code, cases):
-            assert code == CORRECT_TWO_SUM_CODE
-            return JudgeResult(
-                problem_id=problem_id, problem_slug=problem_slug, language="python",
-                status="AC", case_version=cases.version, case_count=len(cases.all_cases),
-                executed_count=len(cases.all_cases), passed_count=len(cases.all_cases),
-                failed_case_index=None, summary="通过当前版本评测用例",
-            )
-
-    monkeypatch.setattr(EvaluationService, "_create_evaluator", lambda self: FakeEvaluator())
     response = client.post("/api/evaluations", json={"problem_id": 1})
-    assert response.status_code == 200
-    run_id = response.json()["evaluation_id"]
+    assert response.status_code == 405
+
     listing = client.get("/api/evaluations?problem_id=1").json()
-    assert listing["total"] == 1
-    assert listing["items"][0]["evaluation_id"] == run_id
-    detail = client.get(f"/api/evaluations/{run_id}")
-    assert detail.status_code == 200
-    assert detail.json()["run_status"] == "SUCCEEDED"
-    assert detail.json()["judge_status"] == "AC"
+    assert listing["total"] == 0
     other = TestClient(app)
     assert other.get("/api/evaluations").json()["items"] == []
-    assert other.get(f"/api/evaluations/{run_id}").status_code == 404
-
-    async def assert_summary_only() -> None:
-        async with session_factory() as session:
-            saved = (await session.execute(select(EvaluationRun))).scalar_one()
-            text_values = " ".join(
-                value for column in EvaluationRun.__table__.columns
-                if isinstance(value := getattr(saved, column.name), str)
-            )
-            for private in (CORRECT_TWO_SUM_CODE, agent.prompts[0], "import json", "nums", "-1000000000", "stdout", "stderr"):
-                assert private not in text_values
-
-    asyncio.run(assert_summary_only())
