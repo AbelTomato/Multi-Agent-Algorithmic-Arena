@@ -237,9 +237,11 @@ class TestSandboxClient:
         assert status == EvaluationStatus.AC
         assert captured[0].url.path == "/execute"
         assert json.loads(captured[0].content) == {
-            "code": "print(1)",
+            "api_version": "execution-api-v2",
+            "runtime_id": "python-3.11-v1",
+            "source": "print(1)",
             "stdin_input": '{"s":"("}',
-            "protocol_version": "json-stdio-v1",
+            "io_protocol": "json-stdio-v1",
         }
 
     @pytest.mark.asyncio

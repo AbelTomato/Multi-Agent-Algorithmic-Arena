@@ -7,6 +7,9 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.judges.base import EvaluationStatus, JSON_STDIO_V1
 
+EXECUTION_API_V2 = "execution-api-v2"
+PYTHON_RUNTIME_V1 = "python-3.11-v1"
+
 
 class ControllerError(Exception):
     """执行控制器基础设施错误的基类。"""
@@ -59,9 +62,11 @@ class SandboxClient:
 
     async def execute(self, *, code: str, stdin_input: str) -> tuple[EvaluationStatus, ExecutionResult]:
         request_data = {
-            "code": code,
+            "api_version": EXECUTION_API_V2,
+            "runtime_id": PYTHON_RUNTIME_V1,
+            "source": code,
             "stdin_input": stdin_input,
-            "protocol_version": JSON_STDIO_V1,
+            "io_protocol": JSON_STDIO_V1,
         }
         try:
             response = await self.client.post(f"{self.base_url}/execute", json=request_data)
