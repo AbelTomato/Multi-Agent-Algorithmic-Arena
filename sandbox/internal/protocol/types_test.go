@@ -5,26 +5,36 @@ import (
 	"testing"
 )
 
-func TestValidateRequestRejectsUnknownProtocol(t *testing.T) {
+func TestValidateRequestLeavesRuntimeIOProtocolSupportToRegistry(t *testing.T) {
 	request := ExecuteRequest{
-		Code:            "print('ok')",
-		StdinInput:      "{}",
-		ProtocolVersion: "unsupported-v1",
+		APIVersion: ExecutionAPIV2,
+		RuntimeID:  "python-3.11-v1",
+		Source:     "print('ok')",
+		StdinInput: "{}",
+		IOProtocol: "unsupported-v1",
 	}
 
-	if err := request.Validate(); err == nil {
-		t.Fatal("Validate() error = nil, want an unsupported protocol error")
+	if err := request.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want structural validation to pass", err)
 	}
 }
 
-func TestValidateRequestUsesUTF8ByteLimits(t *testing.T) {
+func TestDecodeRequestUsesUTF8ByteLimits(t *testing.T) {
 	request := ExecuteRequest{
-		Code:            strings.Repeat("界", MaxCodeBytes/3+1),
-		StdinInput:      "{}",
-		ProtocolVersion: JSONStdioV1,
+		APIVersion: ExecutionAPIV2,
+		RuntimeID:  "python-3.11-v1",
+		Source:     strings.Repeat("界", MaxSourceBytes/3+1),
+		StdinInput: "{}",
+		IOProtocol: JSONStdioV1,
 	}
 
 	if err := request.Validate(); err == nil {
-		t.Fatal("Validate() error = nil, want code byte limit error")
+		t.Fatal("Validate() error = nil, want source byte limit error")
+	}
+}
+
+func TestDecodeRequestRejectsLegacyFields(t *testing.T) {
+	if _, err := DecodeExecuteRequest([]byte(`{"code":"print(1)","stdin_input":"{}","protocol_version":"json-stdio-v1"}`)); err == nil {
+		t.Fatal("DecodeExecuteRequest() error = nil, want legacy request rejection")
 	}
 }

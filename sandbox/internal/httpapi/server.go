@@ -8,18 +8,19 @@ import (
 	"sync"
 
 	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/protocol"
+	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/runtime"
 )
 
-const maxRequestBodyBytes = protocol.MaxCodeBytes + protocol.MaxInputBytes + 4096
+const maxRequestBodyBytes = protocol.MaxSourceBytes + protocol.MaxInputBytes + 4096
 
 type Executor interface {
-	Execute(context.Context, protocol.ExecuteRequest) protocol.ExecuteResult
+	Execute(context.Context, protocol.ExecuteRequest, runtime.Config) protocol.ExecuteResult
 }
 
-type ExecutorFunc func(context.Context, protocol.ExecuteRequest) protocol.ExecuteResult
+type ExecutorFunc func(context.Context, protocol.ExecuteRequest, runtime.Config) protocol.ExecuteResult
 
-func (function ExecutorFunc) Execute(ctx context.Context, request protocol.ExecuteRequest) protocol.ExecuteResult {
-	return function(ctx, request)
+func (function ExecutorFunc) Execute(ctx context.Context, request protocol.ExecuteRequest, config runtime.Config) protocol.ExecuteResult {
+	return function(ctx, request, config)
 }
 
 type Server struct {
@@ -28,19 +29,18 @@ type Server struct {
 	mux      *http.ServeMux
 	root     context.Context
 	cancel   context.CancelFunc
+	registry *runtime.Registry
 	mu       sync.RWMutex
 	closing  bool
 }
 
-type executeRequestBody struct {
-	Code            *string `json:"code"`
-	StdinInput      *string `json:"stdin_input"`
-	ProtocolVersion *string `json:"protocol_version"`
+func NewServer(executor Executor) *Server {
+	return NewServerWithRegistry(executor, runtime.NewRegistry())
 }
 
-func NewServer(executor Executor) *Server {
+func NewServerWithRegistry(executor Executor, registry *runtime.Registry) *Server {
 	root, cancel := context.WithCancel(context.Background())
-	server := &Server{executor: executor, slot: make(chan struct{}, 1), mux: http.NewServeMux(), root: root, cancel: cancel}
+	server := &Server{executor: executor, slot: make(chan struct{}, 1), mux: http.NewServeMux(), root: root, cancel: cancel, registry: registry}
 	server.mux.HandleFunc("GET /health", server.health)
 	server.mux.HandleFunc("POST /execute", server.execute)
 	return server
@@ -78,24 +78,27 @@ func (server *Server) execute(writer http.ResponseWriter, request *http.Request)
 	}
 
 	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes)
-	decoder := json.NewDecoder(request.Body)
-	decoder.DisallowUnknownFields()
-	var body executeRequestBody
-	if err := decoder.Decode(&body); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+	body, err := io.ReadAll(request.Body)
+	if err != nil {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"detail": "invalid execution request"})
 		return
 	}
-	if body.Code == nil || body.StdinInput == nil || body.ProtocolVersion == nil {
+	executeRequest, err := protocol.DecodeExecuteRequest(body)
+	if err != nil {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"detail": "invalid execution request"})
 		return
 	}
-	executeRequest := protocol.ExecuteRequest{
-		Code:            *body.Code,
-		StdinInput:      *body.StdinInput,
-		ProtocolVersion: *body.ProtocolVersion,
+	config, err := server.registry.Resolve(executeRequest.RuntimeID)
+	if err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"detail": "unknown runtime"})
+		return
 	}
-	if err := executeRequest.Validate(); err != nil {
-		writeJSON(writer, http.StatusBadRequest, map[string]string{"detail": "invalid execution request"})
+	if !config.SupportsIOProtocol(executeRequest.IOProtocol) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"detail": "unsupported io_protocol"})
+		return
+	}
+	if len([]byte(executeRequest.Source)) > config.MaxSourceBytes || len([]byte(executeRequest.StdinInput)) > config.MaxInputBytes {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"detail": "execution input exceeds runtime limit"})
 		return
 	}
 	executionContext, cancel := context.WithCancel(request.Context())
@@ -107,7 +110,7 @@ func (server *Server) execute(writer http.ResponseWriter, request *http.Request)
 		case <-executionContext.Done():
 		}
 	}()
-	writeJSON(writer, http.StatusOK, server.executor.Execute(executionContext, executeRequest))
+	writeJSON(writer, http.StatusOK, server.executor.Execute(executionContext, executeRequest, config))
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {

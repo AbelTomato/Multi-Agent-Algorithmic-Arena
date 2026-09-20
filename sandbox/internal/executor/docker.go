@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/runtime"
 )
 
 type DockerCLI struct {
@@ -46,6 +48,14 @@ func (docker *DockerCLI) Run(ctx context.Context, args []string, stdin []byte, c
 	if !ok {
 		return 0, InspectResult{}, errors.New("missing managed task ID")
 	}
+	var config runtime.Config
+	if docker.audit != nil {
+		var auditErr error
+		config, auditErr = runtimeConfigFromRunArgs(args)
+		if auditErr != nil {
+			return 0, InspectResult{}, auditErr
+		}
+	}
 
 	commandContext, cancelCommand := context.WithCancel(ctx)
 	defer cancelCommand()
@@ -73,30 +83,43 @@ func (docker *DockerCLI) Run(ctx context.Context, args []string, stdin []byte, c
 	inspect := docker.inspectOwned(taskID)
 	cleanupCompleted := docker.cleanupOwned(taskID)
 	if err == nil {
-		return docker.finishAuditedRun(taskID, 0, inspect, "completed", cleanupCompleted, started)
+		return docker.finishAuditedRun(taskID, config, 0, inspect, "completed", cleanupCompleted, started)
 	}
 	var exitError *exec.ExitError
 	if errors.As(err, &exitError) {
-		return docker.finishAuditedRun(taskID, exitError.ExitCode(), inspect, "non_zero_exit", cleanupCompleted, started)
+		return docker.finishAuditedRun(taskID, config, exitError.ExitCode(), inspect, "non_zero_exit", cleanupCompleted, started)
 	}
-	if auditErr := docker.writeAudit(taskID, nil, inspect, "docker_error", cleanupCompleted, started); auditErr != nil {
+	if auditErr := docker.writeAudit(taskID, config, nil, inspect, "docker_error", cleanupCompleted, started); auditErr != nil {
 		return 0, inspect, auditErr
 	}
 	return 0, inspect, err
 }
 
-func (docker *DockerCLI) finishAuditedRun(taskID string, exitCode int, inspect InspectResult, outcome string, cleanupCompleted bool, started time.Time) (int, InspectResult, error) {
-	if err := docker.writeAudit(taskID, &exitCode, inspect, outcome, cleanupCompleted, started); err != nil {
+func (docker *DockerCLI) finishAuditedRun(taskID string, config runtime.Config, exitCode int, inspect InspectResult, outcome string, cleanupCompleted bool, started time.Time) (int, InspectResult, error) {
+	if err := docker.writeAudit(taskID, config, &exitCode, inspect, outcome, cleanupCompleted, started); err != nil {
 		return 0, inspect, err
 	}
 	return exitCode, inspect, nil
 }
 
-func (docker *DockerCLI) writeAudit(taskID string, exitCode *int, inspect InspectResult, outcome string, cleanupCompleted bool, started time.Time) error {
+func (docker *DockerCLI) writeAudit(taskID string, config runtime.Config, exitCode *int, inspect InspectResult, outcome string, cleanupCompleted bool, started time.Time) error {
 	if docker.audit == nil {
 		return nil
 	}
-	return docker.audit.Write(newRuntimeAudit(taskID, exitCode, inspect, outcome, cleanupCompleted, started))
+	return docker.audit.Write(newRuntimeAudit(taskID, config, exitCode, inspect, outcome, cleanupCompleted, started))
+}
+
+func runtimeConfigFromRunArgs(args []string) (runtime.Config, error) {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == "-i" {
+			config, err := runtime.NewRegistry().ResolveImage(args[index+1])
+			if err != nil {
+				return runtime.Config{}, errors.New("untrusted runtime image")
+			}
+			return config, nil
+		}
+	}
+	return runtime.Config{}, errors.New("missing runtime image")
 }
 
 func copyOutput(readers *sync.WaitGroup, source io.Reader, write func([]byte) bool, cancel context.CancelFunc) {
@@ -136,6 +159,29 @@ func (docker *DockerCLI) cleanupOwned(taskID string) bool {
 	stopErr := docker.command(context.Background(), "stop", "--time", "0", taskID).Run()
 	removeErr := docker.command(context.Background(), "rm", "--force", taskID).Run()
 	return stopErr == nil && removeErr == nil
+}
+
+func (docker *DockerCLI) CreateArtifactVolume(ctx context.Context, volumeID, taskID string) error {
+	if !isOwnedArtifactVolume(volumeID, taskID) {
+		return errors.New("invalid managed artifact volume")
+	}
+	return docker.command(ctx, "volume", "create", "--name", volumeID,
+		"--label", ArenaOwnershipLabel+"=true", "--label", ArenaTaskIDLabel+"="+taskID).Run()
+}
+
+func (docker *DockerCLI) RemoveArtifactVolume(ctx context.Context, volumeID, taskID string) error {
+	if !isOwnedArtifactVolume(volumeID, taskID) {
+		return errors.New("invalid managed artifact volume")
+	}
+	labels, err := docker.command(ctx, "volume", "inspect", "--format", "{{index .Labels \""+ArenaOwnershipLabel+"\"}}:{{index .Labels \""+ArenaTaskIDLabel+"\"}}", volumeID).Output()
+	if err != nil || strings.TrimSpace(string(labels)) != "true:"+taskID {
+		return errors.New("artifact volume ownership verification failed")
+	}
+	return docker.command(ctx, "volume", "rm", volumeID).Run()
+}
+
+func isOwnedArtifactVolume(volumeID, taskID string) bool {
+	return strings.HasPrefix(taskID, "arena-task-") && volumeID == taskID+"-artifact"
 }
 
 func (docker *DockerCLI) ListManagedTasks(ctx context.Context) ([]ManagedTask, error) {

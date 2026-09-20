@@ -20,6 +20,7 @@ import (
 	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/executor"
 	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/httpapi"
 	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/protocol"
+	runtimeconfig "github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/runtime"
 )
 
 const timeoutResponseDeadline = 6 * time.Second
@@ -52,7 +53,7 @@ func TestRunnerRealDockerLifecycle(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			result := runner.Execute(context.Background(), request(testCase.code))
+			result := runner.Execute(context.Background(), request(testCase.code), pythonRuntime(t))
 			if result.ExitReason != testCase.wantReason {
 				t.Fatalf("exit reason = %q, want %q", result.ExitReason, testCase.wantReason)
 			}
@@ -64,9 +65,59 @@ func TestRunnerRealDockerLifecycle(t *testing.T) {
 	}
 }
 
+func TestRunnerRealDockerCppCompilationLifecycle(t *testing.T) {
+	runner := executor.NewRunner(executor.NewDockerCLI())
+	config, err := runtimeconfig.NewRegistry().Resolve(runtimeconfig.CppGcc14Cpp20V1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name       string
+		code       string
+		wantReason protocol.ExitReason
+		wantStdout string
+	}{
+		{
+			name:       "cpp20_program",
+			code:       "#include <iostream>\nint main() { std::cout << 42; }",
+			wantReason: protocol.ExitReasonCompleted,
+			wantStdout: "42",
+		},
+		{
+			name:       "compile_error",
+			code:       "int main( {",
+			wantReason: protocol.ExitReasonCompilationFailed,
+		},
+		{
+			name:       "runtime_timeout",
+			code:       "int main() { for (;;) {} }",
+			wantReason: protocol.ExitReasonTimeout,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			result := runner.Execute(context.Background(), protocol.ExecuteRequest{
+				APIVersion: protocol.ExecutionAPIV2,
+				RuntimeID:  runtimeconfig.CppGcc14Cpp20V1,
+				Source:     testCase.code,
+				StdinInput: "{}",
+				IOProtocol: protocol.JSONStdioV1,
+			}, config)
+			if result.ExitReason != testCase.wantReason {
+				t.Fatalf("exit reason = %q, want %q; stderr=%q", result.ExitReason, testCase.wantReason, result.Stderr)
+			}
+			if result.Stdout != testCase.wantStdout {
+				t.Fatalf("stdout = %q, want %q", result.Stdout, testCase.wantStdout)
+			}
+			assertNoArenaContainersForTest(t)
+			assertNoArenaArtifactVolumesForTest(t)
+		})
+	}
+}
+
 func TestRecoverStaleTasksRemovesVerifiedRealDockerTask(t *testing.T) {
 	taskID := fmt.Sprintf("arena-task-recovery-%d", time.Now().UnixNano())
-	createArgs := executor.NewRunner(nil).BuildDockerRunArgs(taskID, `import time; time.sleep(60)`)
+	createArgs := executor.NewRunner(nil).BuildDockerRunArgs(taskID, pythonRuntime(t), `import time; time.sleep(60)`)
 	createArgs = append([]string{"run", "--detach"}, createArgs[1:]...)
 	if output, err := exec.Command("docker", createArgs...).CombinedOutput(); err != nil {
 		t.Fatalf("create stale Arena task: %v", sanitizeDockerTestError(err, output))
@@ -94,7 +145,7 @@ func TestControllerProcessRestartRecoversActiveTask(t *testing.T) {
 
 	requestDone := make(chan error, 1)
 	go func() {
-		response, err := http.Post("http://127.0.0.1:8001/execute", "application/json", strings.NewReader(`{"code":"import time; time.sleep(30)","stdin_input":"{}","protocol_version":"json-stdio-v1"}`))
+		response, err := http.Post("http://127.0.0.1:8001/execute", "application/json", strings.NewReader(`{"api_version":"execution-api-v2","runtime_id":"python-3.11-v1","source":"import time; time.sleep(30)","stdin_input":"{}","io_protocol":"json-stdio-v1"}`))
 		if response != nil {
 			response.Body.Close()
 		}
@@ -236,15 +287,17 @@ func removeVerifiedArenaContainerForTest(t *testing.T, containerID string) {
 func TestRunnerRealDockerPassesJSONStandardInputAndOutput(t *testing.T) {
 	runner := executor.NewRunner(executor.NewDockerCLI())
 	result := runner.Execute(context.Background(), protocol.ExecuteRequest{
-		Code: `
+		APIVersion: protocol.ExecutionAPIV2,
+		RuntimeID:  runtimeconfig.Python311V1,
+		Source: `
 import json
 import sys
 value = json.loads(sys.stdin.read())
 print(json.dumps({"sum": value["a"] + value["b"]}))
 `,
-		StdinInput:      `{"a":5,"b":3}`,
-		ProtocolVersion: protocol.JSONStdioV1,
-	})
+		StdinInput: `{"a":5,"b":3}`,
+		IOProtocol: protocol.JSONStdioV1,
+	}, pythonRuntime(t))
 	if result.ExitReason != protocol.ExitReasonCompleted {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonCompleted)
 	}
@@ -265,7 +318,7 @@ func TestRunnerRealDockerEnforcesSharedOutputLimitAcrossStreams(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			result := runner.Execute(context.Background(), request(testCase.code))
+			result := runner.Execute(context.Background(), request(testCase.code), pythonRuntime(t))
 			if result.ExitReason != protocol.ExitReasonOutputLimitExceeded {
 				t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonOutputLimitExceeded)
 			}
@@ -280,7 +333,7 @@ func TestRunnerRealDockerEnforcesSharedOutputLimitAcrossStreams(t *testing.T) {
 func TestRunnerRealDockerStopsTimeoutWithinWallClockBudget(t *testing.T) {
 	runner := executor.NewRunner(executor.NewDockerCLI())
 	started := time.Now()
-	result := runner.Execute(context.Background(), request(`import time; time.sleep(10)`))
+	result := runner.Execute(context.Background(), request(`import time; time.sleep(10)`), pythonRuntime(t))
 	elapsed := time.Since(started)
 	if result.ExitReason != protocol.ExitReasonTimeout {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonTimeout)
@@ -320,7 +373,7 @@ checks.append("capabilities-dropped" if "CapEff:\t0000000000000000" in status el
 checks.append("no-new-privileges" if "NoNewPrivs:\t1" in status else "new-privileges-allowed")
 print("|".join(checks))
 `
-	result := runner.Execute(context.Background(), request(code))
+	result := runner.Execute(context.Background(), request(code), pythonRuntime(t))
 	if result.ExitReason != protocol.ExitReasonCompleted {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonCompleted)
 	}
@@ -344,7 +397,7 @@ try:
 except OSError:
     print("tmpfs-limited")
 `
-	result := runner.Execute(context.Background(), request(code))
+	result := runner.Execute(context.Background(), request(code), pythonRuntime(t))
 	if result.ExitReason != protocol.ExitReasonCompleted {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonCompleted)
 	}
@@ -378,7 +431,7 @@ finally:
         except ChildProcessError:
             pass
 `
-	result := runner.Execute(context.Background(), request(code))
+	result := runner.Execute(context.Background(), request(code), pythonRuntime(t))
 	if result.ExitReason != protocol.ExitReasonCompleted {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonCompleted)
 	}
@@ -390,7 +443,7 @@ finally:
 
 func TestHTTPServerRejectsConcurrentRealDockerExecution(t *testing.T) {
 	server := httpapi.NewServer(executor.NewRunner(executor.NewDockerCLI()))
-	body := `{"code":"import time; time.sleep(3)","stdin_input":"{}","protocol_version":"json-stdio-v1"}`
+	body := `{"api_version":"execution-api-v2","runtime_id":"python-3.11-v1","source":"import time; time.sleep(3)","stdin_input":"{}","io_protocol":"json-stdio-v1"}`
 	firstDone := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		response := httptest.NewRecorder()
@@ -414,7 +467,7 @@ func TestHTTPServerRejectsConcurrentRealDockerExecution(t *testing.T) {
 func TestHTTPServerCancelsDisconnectedRealDockerExecution(t *testing.T) {
 	server := httpapi.NewServer(executor.NewRunner(executor.NewDockerCLI()))
 	requestContext, cancel := context.WithCancel(context.Background())
-	body := `{"code":"import time; time.sleep(10)","stdin_input":"{}","protocol_version":"json-stdio-v1"}`
+	body := `{"api_version":"execution-api-v2","runtime_id":"python-3.11-v1","source":"import time; time.sleep(10)","stdin_input":"{}","io_protocol":"json-stdio-v1"}`
 	response := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
@@ -445,7 +498,7 @@ func TestHTTPServerCancelsDisconnectedRealDockerExecution(t *testing.T) {
 
 func TestRunnerReportsReliableOOMEvidenceWhenDockerProvidesIt(t *testing.T) {
 	runner := executor.NewRunner(executor.NewDockerCLI())
-	result := runner.Execute(context.Background(), request(`payload = bytearray(256 * 1024 * 1024); print(len(payload))`))
+	result := runner.Execute(context.Background(), request(`payload = bytearray(256 * 1024 * 1024); print(len(payload))`), pythonRuntime(t))
 	if result.ExitReason != protocol.ExitReasonMemoryLimitExceeded || !result.OOMKilled {
 		t.Skipf("Docker did not provide stable OOM evidence; exit_reason=%q oom_killed=%t", result.ExitReason, result.OOMKilled)
 	}
@@ -453,13 +506,34 @@ func TestRunnerReportsReliableOOMEvidenceWhenDockerProvidesIt(t *testing.T) {
 }
 
 func request(code string) protocol.ExecuteRequest {
-	return protocol.ExecuteRequest{Code: code, StdinInput: "{}", ProtocolVersion: protocol.JSONStdioV1}
+	return protocol.ExecuteRequest{APIVersion: protocol.ExecutionAPIV2, RuntimeID: runtimeconfig.Python311V1, Source: code, StdinInput: "{}", IOProtocol: protocol.JSONStdioV1}
+}
+
+func pythonRuntime(t *testing.T) runtimeconfig.Config {
+	t.Helper()
+	config, err := runtimeconfig.NewRegistry().Resolve(runtimeconfig.Python311V1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return config
 }
 
 func assertNoArenaContainersForTest(t *testing.T) {
 	t.Helper()
 	if err := assertNoArenaContainers(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertNoArenaArtifactVolumesForTest(t *testing.T) {
+	t.Helper()
+	output, err := exec.Command("docker", "volume", "ls", "--quiet", "--filter", "label="+executor.ArenaOwnershipLabel+"=true").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identifiers := strings.Fields(string(output)); len(identifiers) != 0 {
+		encoded, _ := json.Marshal(identifiers)
+		t.Fatalf("Arena-labelled artifact volumes remain after integration test: %s", encoded)
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/runtime"
 )
 
 func TestDockerCLICleansVerifiedTaskAfterSuccessfulExecution(t *testing.T) {
@@ -77,6 +79,32 @@ func TestDockerCLIListsManagedTasksWithFullContainerIdentifiers(t *testing.T) {
 	}
 }
 
+func TestDockerCLICreatesAndRemovesOnlyVerifiedArtifactVolume(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "docker-cli-volume.log")
+	t.Setenv("ARENA_DOCKER_HELPER", "1")
+	t.Setenv("ARENA_DOCKER_HELPER_LOG", logPath)
+	docker := newDockerCLIForCommand(testDockerCommand)
+	taskID := "arena-task-artifact"
+	volumeID := taskID + "-artifact"
+
+	if err := docker.CreateArtifactVolume(context.Background(), volumeID, taskID); err != nil {
+		t.Fatalf("CreateArtifactVolume() error = %v", err)
+	}
+	if err := docker.RemoveArtifactVolume(context.Background(), volumeID, taskID); err != nil {
+		t.Fatalf("RemoveArtifactVolume() error = %v", err)
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	got := strings.Fields(string(content))
+	want := []string{"volume-create", "volume-inspect", "volume-rm"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("CLI calls = %v, want %v", got, want)
+	}
+}
+
 func TestDockerCLIWritesSanitizedRuntimeAuditAfterCleanup(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "sandbox-audit.jsonl")
 	t.Setenv("ARENA_DOCKER_HELPER", "1")
@@ -99,7 +127,7 @@ func TestDockerCLIWritesSanitizedRuntimeAuditAfterCleanup(t *testing.T) {
 			"--tmpfs", "/tmp:size=64m,noexec", "--user", "65534:65534",
 			"--cpus", "1", "--memory", "128m", "--memory-swap", "128m",
 			"--pids-limit", "32", "--cap-drop", "ALL",
-			"--security-opt", "no-new-privileges", "-i", RuntimeImage,
+			"--security-opt", "no-new-privileges", "-i", mustRuntimeImage(t),
 			"python3", "-c", candidateCode,
 		},
 		[]byte(`{"secret":"stdin-secret"}`),
@@ -124,6 +152,42 @@ func TestDockerCLIWritesSanitizedRuntimeAuditAfterCleanup(t *testing.T) {
 			t.Fatalf("audit record missing %q: %s", required, line)
 		}
 	}
+}
+
+func TestDockerCLIAuditsCppRuntimeImageFromTrustedRunArgs(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "sandbox-cpp-audit.jsonl")
+	t.Setenv("ARENA_DOCKER_HELPER", "1")
+	audit, err := NewAuditLogger(logPath)
+	if err != nil {
+		t.Fatalf("NewAuditLogger() error = %v", err)
+	}
+	docker := newDockerCLIForCommandWithAudit(testDockerCommand, audit)
+	config, err := runtime.NewRegistry().Resolve(runtime.CppGcc14Cpp20V1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := "arena-task-cpp-audit"
+	args := NewRunner(nil).BuildCompiledProgramRunArgs(taskID, taskID+"-artifact", config)
+
+	if _, _, err := docker.Run(context.Background(), args, nil, NewOutputCollector(64*1024)); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(content), `"runtime_image":"`+config.Image+`"`) {
+		t.Fatalf("audit record = %s, want C++ runtime image %q", content, config.Image)
+	}
+}
+
+func mustRuntimeImage(t *testing.T) string {
+	t.Helper()
+	config, err := runtime.NewRegistry().Resolve(runtime.Python311V1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return config.Image
 }
 
 func containsArgument(arguments []string, expected string) bool {
@@ -156,7 +220,11 @@ func TestDockerCLIHelperProcess(t *testing.T) {
 		os.Exit(2)
 	}
 	command := args[separator]
-	logCommand(command)
+	if command == "volume" && separator+1 < len(args) {
+		logCommand("volume-" + args[separator+1])
+	} else {
+		logCommand(command)
+	}
 	switch command {
 	case "run":
 		_, _ = io.WriteString(os.Stdout, "ok")
@@ -172,6 +240,21 @@ func TestDockerCLIHelperProcess(t *testing.T) {
 			_, _ = io.WriteString(os.Stdout, "true:"+args[len(args)-1])
 		}
 	case "stop", "rm":
+	case "volume":
+		if separator+1 >= len(args) {
+			os.Exit(2)
+		}
+		switch args[separator+1] {
+		case "create":
+			_, _ = io.WriteString(os.Stdout, args[separator+3]+"\n")
+		case "inspect":
+			volumeID := args[len(args)-1]
+			taskID := strings.TrimSuffix(volumeID, "-artifact")
+			_, _ = io.WriteString(os.Stdout, "true:"+taskID)
+		case "rm":
+		default:
+			os.Exit(3)
+		}
 	default:
 		os.Exit(3)
 	}

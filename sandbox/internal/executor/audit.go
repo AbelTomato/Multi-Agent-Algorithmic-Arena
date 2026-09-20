@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/runtime"
 )
 
 const defaultAuditLogPath = "arena-sandbox-audit.jsonl"
@@ -77,23 +79,23 @@ func (logger *AuditLogger) Write(record RuntimeAudit) error {
 	return nil
 }
 
-func newRuntimeAudit(taskID string, exitCode *int, inspect InspectResult, runOutcome string, cleanupCompleted bool, started time.Time) RuntimeAudit {
+func newRuntimeAudit(taskID string, config runtime.Config, exitCode *int, inspect InspectResult, runOutcome string, cleanupCompleted bool, started time.Time) RuntimeAudit {
 	return RuntimeAudit{
 		Event:            "arena_task",
 		Timestamp:        time.Now().UTC().Format(time.RFC3339Nano),
 		TaskID:           taskID,
-		RuntimeImage:     RuntimeImage,
-		NetworkMode:      "none",
-		ReadOnly:         true,
-		Tmpfs:            "/tmp:size=64m,noexec",
-		User:             "65534:65534",
-		CPUs:             "1",
-		Memory:           "128m",
-		MemorySwap:       "128m",
-		PIDsLimit:        "32",
-		CapDrop:          "ALL",
-		NoNewPrivileges:  true,
-		WallTimeoutMS:    wallTimeout.Milliseconds(),
+		RuntimeImage:     config.Image,
+		NetworkMode:      config.NetworkMode,
+		ReadOnly:         config.ReadOnly,
+		Tmpfs:            config.Tmpfs,
+		User:             config.User,
+		CPUs:             config.CPUs,
+		Memory:           config.Memory,
+		MemorySwap:       config.MemorySwap,
+		PIDsLimit:        config.PIDsLimit,
+		CapDrop:          config.CapDrop,
+		NoNewPrivileges:  config.NoNewPrivileges,
+		WallTimeoutMS:    config.WallTimeout.Milliseconds(),
 		ExitCode:         exitCode,
 		OOMKilled:        inspect.OOMKilled,
 		RunOutcome:       runOutcome,

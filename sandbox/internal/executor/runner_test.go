@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/protocol"
+	"github.com/AbelTomato/Multi-Agent-Algorithmic-Arena/sandbox/internal/runtime"
 )
 
 type fakeDocker struct{}
@@ -26,10 +27,11 @@ func (docker *countingDocker) Run(context.Context, []string, []byte, *OutputColl
 
 func TestBuildDockerRunArgsUsesFixedLimitsAndServerTaskID(t *testing.T) {
 	runner := NewRunner(fakeDocker{})
-	args := runner.BuildDockerRunArgs("arena-task-server-generated", "print(1)")
+	config := mustPythonRuntime(t)
+	args := runner.BuildDockerRunArgs("arena-task-server-generated", config, "print(1)")
 	const approvedRuntimeImage = "m.daocloud.io/docker.io/library/python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534"
-	if RuntimeImage != approvedRuntimeImage {
-		t.Fatalf("RuntimeImage = %q, want approved fixed image %q", RuntimeImage, approvedRuntimeImage)
+	if config.Image != approvedRuntimeImage {
+		t.Fatalf("runtime image = %q, want approved fixed image %q", config.Image, approvedRuntimeImage)
 	}
 
 	want := []string{
@@ -37,7 +39,7 @@ func TestBuildDockerRunArgsUsesFixedLimitsAndServerTaskID(t *testing.T) {
 		"--label", ArenaTaskIDLabel + "=arena-task-server-generated", "--network", "none", "--read-only",
 		"--tmpfs", "/tmp:size=64m,noexec", "--user", "65534:65534", "--cpus", "1", "--memory", "128m",
 		"--memory-swap", "128m", "--pids-limit", "32", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-		"-i", RuntimeImage, "python3", "-c", "print(1)",
+		"-i", config.Image, "python3", "-c", "print(1)",
 	}
 	if len(args) != len(want) {
 		t.Fatalf("args = %#v, want %#v", args, want)
@@ -111,7 +113,7 @@ func TestRunnerReturnsCancelledForCancelledContext(t *testing.T) {
 	context, cancel := context.WithCancel(context.Background())
 	cancel()
 	runner := NewRunner(fakeDocker{})
-	result := runner.Execute(context, protocol.ExecuteRequest{Code: "print(1)", StdinInput: "{}", ProtocolVersion: protocol.JSONStdioV1})
+	result := runner.Execute(context, testRequest("print(1)"), mustPythonRuntime(t))
 	if result.ExitReason != protocol.ExitReasonCancelled {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonCancelled)
 	}
@@ -124,11 +126,30 @@ func TestRunnerRejectsExecutionWhenTaskIDGenerationFails(t *testing.T) {
 		return "", errors.New("random source unavailable")
 	}
 
-	result := runner.Execute(context.Background(), protocol.ExecuteRequest{Code: "print(1)", StdinInput: "{}", ProtocolVersion: protocol.JSONStdioV1})
+	result := runner.Execute(context.Background(), testRequest("print(1)"), mustPythonRuntime(t))
 	if result.ExitReason != protocol.ExitReasonUnknownError {
 		t.Fatalf("exit reason = %q, want %q", result.ExitReason, protocol.ExitReasonUnknownError)
 	}
 	if docker.calls != 0 {
 		t.Fatalf("Docker Run() calls = %d, want 0", docker.calls)
 	}
+}
+
+func testRequest(source string) protocol.ExecuteRequest {
+	return protocol.ExecuteRequest{
+		APIVersion: protocol.ExecutionAPIV2,
+		RuntimeID:  runtime.Python311V1,
+		Source:     source,
+		StdinInput: "{}",
+		IOProtocol: protocol.JSONStdioV1,
+	}
+}
+
+func mustPythonRuntime(t *testing.T) runtime.Config {
+	t.Helper()
+	config, err := runtime.NewRegistry().Resolve(runtime.Python311V1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return config
 }
