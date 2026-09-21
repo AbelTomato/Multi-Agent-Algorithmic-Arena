@@ -14,6 +14,7 @@ from app.api.problems import router as problem_router
 from app.api.evaluations import router as evaluation_router
 from app.api.solutions import router as solution_router
 from app.api.submissions import router as submission_router
+from app.api.contests import router as contest_router
 settings = get_settings()
 
 
@@ -55,12 +56,13 @@ app.add_middleware(
     allow_origins=settings.cors_origin_list,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 app.include_router(problem_router)
 app.include_router(solution_router)
 app.include_router(evaluation_router)
 app.include_router(submission_router)
+app.include_router(contest_router)
 
 @app.get("/")
 async def root() -> dict[str, str]:

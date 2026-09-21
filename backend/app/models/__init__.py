@@ -5,6 +5,14 @@ from app.models.evaluation_run import (
     EvaluationRun,
     EvaluationRunStatus,
 )
+from app.models.contest import (
+    Contest,
+    ContestAction,
+    ContestAgentAttempt,
+    ContestAgentLease,
+    ContestEvent,
+    ContestSeat,
+)
 from app.models.problem import Problem
 from app.models.permission import ProblemSubmissionPermission
 from app.models.submission import Submission
@@ -14,6 +22,12 @@ __all__ = [
     "EvaluationRun",
     "EvaluationRunStatus",
     "Evaluation",
+    "Contest",
+    "ContestAction",
+    "ContestAgentAttempt",
+    "ContestAgentLease",
+    "ContestEvent",
+    "ContestSeat",
     "AccessToken",
     "Account",
     "Problem",
