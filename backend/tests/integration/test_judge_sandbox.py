@@ -195,9 +195,11 @@ class TestExecutionFailureIntegration:
     async def test_busy_controller_is_preserved_without_running_second_candidate(self) -> None:
         cases = CaseCatalog().load("valid-parentheses", "v1")
         payload = {
-            "code": INFINITE_LOOP,
+            "api_version": "execution-api-v2",
+            "runtime_id": "python-3.11-v1",
+            "source": INFINITE_LOOP,
             "stdin_input": '{"s":"()"}',
-            "protocol_version": "json-stdio-v1",
+            "io_protocol": "json-stdio-v1",
         }
         async with httpx.AsyncClient(timeout=8.0, trust_env=False) as holder:
             first_request = asyncio.create_task(holder.post("http://127.0.0.1:8001/execute", json=payload))
