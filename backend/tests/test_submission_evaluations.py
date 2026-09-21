@@ -76,13 +76,13 @@ async def _create_submission(session: AsyncSession, *, source: str = "print(1)")
     return owner, problem, submission
 
 
-def _judge_result() -> JudgeResult:
+def _judge_result(*, case_version: str = "v2") -> JudgeResult:
     return JudgeResult(
         problem_id=1,
         problem_slug="two-sum",
         language="python",
         status=EvaluationStatus.AC,
-        case_version="v2",
+        case_version=case_version,
         case_count=1,
         executed_count=1,
         passed_count=1,
@@ -119,6 +119,61 @@ async def test_evaluation_uses_problem_active_case_version_and_persists_submissi
         persisted = await session.get(Evaluation, saved.id)
         assert persisted is not None
         assert persisted.submission_id == submission.id
+
+
+@pytest.mark.asyncio
+async def test_submission_and_evaluation_snapshots_survive_a_new_session(
+    evaluation_database,
+) -> None:
+    async with evaluation_database() as session:
+        owner, _, submission = await _create_submission(session)
+        evaluator = FakeEvaluator(_judge_result())
+        saved = await SubmissionEvaluationService(
+            session,
+            case_catalog=FakeCatalog(),
+            evaluator_factory=lambda runtime_id: evaluator,
+        ).evaluate(owner, submission.id)
+        await session.commit()
+        evaluation_id = saved.id
+        submission_id = submission.id
+
+    async with evaluation_database() as restarted_session:
+        reloaded_submission = await restarted_session.get(Submission, submission_id)
+        reloaded_evaluation = await restarted_session.get(Evaluation, evaluation_id)
+
+        assert reloaded_submission is not None
+        assert reloaded_submission.source == "print(1)"
+        assert reloaded_submission.source_sha256 == sha256(b"print(1)").hexdigest()
+        assert reloaded_submission.language == "python"
+        assert reloaded_submission.runtime_id == "python-3.11-v1"
+
+        assert reloaded_evaluation is not None
+        assert reloaded_evaluation.submission_id == submission_id
+        assert reloaded_evaluation.source_sha256 == reloaded_submission.source_sha256
+        assert reloaded_evaluation.language == reloaded_submission.language
+        assert reloaded_evaluation.runtime_id == reloaded_submission.runtime_id
+        assert reloaded_evaluation.case_version == "v2"
+        assert reloaded_evaluation.judge_status == "AC"
+        assert reloaded_evaluation.summary == "passed"
+
+
+@pytest.mark.asyncio
+async def test_evaluation_persists_the_server_selected_case_version(
+    evaluation_database,
+) -> None:
+    async with evaluation_database() as session:
+        owner, problem, submission = await _create_submission(session)
+        catalog = FakeCatalog()
+        evaluator = FakeEvaluator(_judge_result(case_version="v1"))
+
+        saved = await SubmissionEvaluationService(
+            session,
+            case_catalog=catalog,
+            evaluator_factory=lambda runtime_id: evaluator,
+        ).evaluate(owner, submission.id)
+
+        assert catalog.calls == [(problem.slug, "v2")]
+        assert saved.case_version == "v2"
 
 
 @pytest.mark.asyncio

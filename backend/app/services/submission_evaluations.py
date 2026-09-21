@@ -89,7 +89,7 @@ class SubmissionEvaluationService:
             source_sha256=submission.source_sha256,
             language=submission.language,
             runtime_id=submission.runtime_id,
-            case_version=result.case_version,
+            case_version=case_version,
             judge_status=result.status.value,
             case_count=result.case_count,
             executed_count=result.executed_count,
