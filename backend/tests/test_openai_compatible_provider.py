@@ -163,6 +163,9 @@ async def test_openai_compatible_provider_rejects_invalid_response_format() -> N
     ("response", "expected_error"),
     [
         (httpx.Response(200, text="not-json"), "invalid format"),
+        (httpx.Response(200, json=None), "invalid format"),
+        (httpx.Response(200, json=[]), "invalid format"),
+        (httpx.Response(200, json="not-an-object"), "invalid format"),
         (
             httpx.Response(200, json={"choices": [{"message": {"content": ""}}]}),
             "empty content",
@@ -225,6 +228,116 @@ def test_factory_requires_api_key_for_openai_compatible_agent() -> None:
 
     with pytest.raises(ValueError, match="LLM_API_KEY"):
         get_agent(settings)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("usage,expected", [
+    ({"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19}, (12, 7)),
+    ({"prompt_tokens": 0, "completion_tokens": 0}, (0, 0)),
+    (None, None), ({}, None), ([], None),
+    ({"prompt_tokens": -1, "completion_tokens": 7}, None),
+    ({"prompt_tokens": True, "completion_tokens": 7}, None),
+    ({"prompt_tokens": "12", "completion_tokens": 7}, None),
+    ({"prompt_tokens": 12}, None),
+])
+async def test_metadata_preserves_text_and_validates_usage(usage, expected):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": "answer"}}], "usage": usage,
+        })
+
+    provider = OpenAICompatibleProvider(
+        api_key="test-key", base_url="https://llm.example.test/v1", model="test-model",
+        timeout_seconds=1, max_tokens=100, transport=httpx.MockTransport(handler),
+    )
+    result = await provider.complete_with_metadata("prompt")
+    assert result.text == "answer"
+    actual = None if result.usage is None else (result.usage.input_tokens, result.usage.output_tokens)
+    assert actual == expected
+    assert len(requests) == 1
+    assert await provider.complete("prompt") == "answer"
+    assert len(requests) == 2
+    assert "test-key" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_meter_counts_failed_calls_and_keeps_unknown_tokens():
+    from app.providers.base import CompletionResult, MeteredProvider, TokenUsage
+
+    class FakeProvider:
+        async def complete_with_metadata(self, prompt):
+            if prompt == "fail":
+                raise RuntimeError("private failure")
+            return CompletionResult(text="answer", usage=TokenUsage(input_tokens=4, output_tokens=2))
+
+    meter = MeteredProvider(FakeProvider())
+    assert (await meter.complete_with_metadata("ok")).text == "answer"
+    with pytest.raises(RuntimeError):
+        await meter.complete_with_metadata("fail")
+    assert meter.calls == 2
+    assert meter.usage_calls == 1
+    assert meter.input_tokens is None and meter.output_tokens is None
+    assert "private failure" not in repr(meter)
+
+
+@pytest.mark.asyncio
+async def test_meter_records_cancellation_without_swallowing_it():
+    import asyncio
+    from app.providers.base import MeteredProvider
+
+    class CancelledProvider:
+        async def complete_with_metadata(self, prompt):
+            raise asyncio.CancelledError()
+
+    meter = MeteredProvider(CancelledProvider())
+    with pytest.raises(asyncio.CancelledError):
+        await meter.complete_with_metadata("prompt")
+    assert meter.calls == 1 and meter.usage_calls == 0
+    assert meter.input_tokens is None
+
+
+def test_text_only_provider_remains_compatible():
+    from app.providers.base import Provider
+
+    class TextOnly:
+        async def complete(self, prompt):
+            return "answer"
+
+    assert isinstance(TextOnly(), Provider)
+
+
+@pytest.mark.asyncio
+async def test_meter_accumulates_known_usage_and_isolates_runs():
+    from app.providers.base import CompletionResult, MeteredProvider, TokenUsage
+
+    class FakeProvider:
+        async def complete_with_metadata(self, prompt):
+            usage = None if prompt == "unknown" else TokenUsage(input_tokens=4, output_tokens=2)
+            return CompletionResult(text="answer", usage=usage)
+
+    provider = FakeProvider()
+    first, second = MeteredProvider(provider), MeteredProvider(provider)
+    await first.complete_with_metadata("known")
+    await first.complete_with_metadata("known")
+    assert (first.calls, first.usage_calls, first.input_tokens, first.output_tokens) == (2, 2, 8, 4)
+    assert (second.calls, second.usage_calls) == (0, 0)
+    await first.complete_with_metadata("unknown")
+    assert (first.calls, first.usage_calls) == (3, 2)
+    assert first.input_tokens is first.output_tokens is None
+
+
+def test_metadata_models_reject_extra_fields_and_hide_text_in_repr():
+    from pydantic import ValidationError
+    from app.providers.base import CompletionResult, TokenUsage
+
+    with pytest.raises(ValidationError):
+        TokenUsage(input_tokens=1, output_tokens=2, source="not allowed")
+    with pytest.raises(ValidationError):
+        CompletionResult(text="answer", credentials="not allowed")
+    assert "private candidate body" not in repr(CompletionResult(text="private candidate body"))
 
 
 def test_factory_rejects_empty_api_key_for_openai_compatible_agent() -> None:

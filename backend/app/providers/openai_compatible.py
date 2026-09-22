@@ -1,5 +1,7 @@
 import httpx
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
+
+from app.providers.base import CompletionResult, TokenUsage
 
 
 class OpenAICompatibleProvider:
@@ -23,6 +25,9 @@ class OpenAICompatibleProvider:
         self.transport = transport
 
     async def complete(self, prompt: str) -> str:
+        return (await self.complete_with_metadata(prompt)).text
+
+    async def complete_with_metadata(self, prompt: str) -> CompletionResult:
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
@@ -51,11 +56,25 @@ class OpenAICompatibleProvider:
             )
 
         try:
-            content = response.json()["choices"][0]["message"]["content"]
+            body = response.json()
+            if not isinstance(body, dict):
+                raise TypeError("response body must be an object")
+            content = body["choices"][0]["message"]["content"]
         except (IndexError, KeyError, TypeError, ValueError) as error:
             raise RuntimeError("OpenAI Compatible response has an invalid format") from error
 
         if not isinstance(content, str) or not content.strip():
             raise RuntimeError("OpenAI Compatible response has empty content")
 
-        return content
+        usage = None
+        raw_usage = body.get("usage")
+        if isinstance(raw_usage, dict):
+            try:
+                usage = TokenUsage(
+                    input_tokens=raw_usage.get("prompt_tokens"),
+                    output_tokens=raw_usage.get("completion_tokens"),
+                )
+            except ValidationError:
+                # 非法或不完整 usage 是未知计量，不影响既有文本接口。
+                pass
+        return CompletionResult(text=content, usage=usage)
